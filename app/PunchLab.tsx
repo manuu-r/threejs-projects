@@ -3352,6 +3352,28 @@ export default function PunchLab() {
           <small className="challenge-details">
             TAG ME + POST YOUR SCORE SCREENSHOT
           </small>
+          <div className="x-follow-cta">
+            <div className="x-follow-button-shell">
+              <span className="x-follow-logo" aria-hidden="true">
+                𝕏
+              </span>
+              <a
+                href="https://x.com/manudotdev?ref_src=twsrc%5Etfw"
+                className="twitter-follow-button"
+                data-show-count="false"
+                data-show-screen-name="false"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Follow
+              </a>
+            </div>
+            <script
+              async
+              src="https://platform.x.com/widgets.js"
+              charSet="utf-8"
+            />
+          </div>
         </div>
         <div className="stat-block stat-primary">
           <span className="stat-label">PUNCH SCORE</span>

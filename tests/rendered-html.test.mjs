@@ -44,6 +44,10 @@ test("server-renders the finished punch challenge", async () => {
   assert.match(html, /1 YEAR OF/);
   assert.match(html, /SPARCD FREE/);
   assert.match(html, /AT LAUNCH/);
+  assert.match(html, />Follow<\/a>/);
+  assert.match(html, /twitter-follow-button/);
+  assert.match(html, /data-show-screen-name="false"/);
+  assert.match(html, /https:\/\/platform\.x\.com\/widgets\.js/);
   assert.match(html, /data-testid="start-camera"/);
   assert.doesNotMatch(html, /KINETIQ|THREE\.JS \/ CANNON-ES/i);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Building your site/i);
@@ -79,6 +83,8 @@ test("keeps punching camera-only", async () => {
     /manualPunch|onPointerDown|onPointerUp|addEventListener\(["']keydown|DEFAULT_CALIBRATION/,
   );
   assert.match(component, /const HAND_SIZE_GAIN = 1\.4/);
+  assert.match(component, /className="x-follow-logo"/);
+  assert.match(component, />\s*𝕏\s*<\/span>/);
   assert.match(component, /Left and right hands showing thumbs up/);
   assert.match(component, /gesture-hand-left/);
   assert.match(component, /PoseLandmarker\.createFromOptions/);
@@ -103,4 +109,5 @@ test("keeps punching camera-only", async () => {
   assert.match(component, /\/assets\/hands\/left\.glb/);
   assert.doesNotMatch(component, /const armConnections|FOREARMS DETECTED|Keep both elbows/);
   assert.match(styles, /\.arena-canvas\s*\{[^}]*pointer-events:\s*none;/s);
+  assert.match(styles, /\.stats-rail\s*\{[^}]*transform:\s*scale\(1\.2\);/s);
 });
