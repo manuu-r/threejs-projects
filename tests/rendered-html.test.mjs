@@ -48,6 +48,11 @@ test("server-renders the finished punch challenge", async () => {
   assert.match(html, /twitter-follow-button/);
   assert.match(html, /data-show-screen-name="false"/);
   assert.match(html, /https:\/\/platform\.x\.com\/widgets\.js/);
+  assert.match(
+    html,
+    /https:\/\/www\.googletagmanager\.com\/gtag\/js\?id=G-F5WCNFZYZW/,
+  );
+  assert.match(html, /gtag\('config', 'G-F5WCNFZYZW'\)/);
   assert.match(html, /data-testid="start-camera"/);
   assert.doesNotMatch(html, /KINETIQ|THREE\.JS \/ CANNON-ES/i);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Building your site/i);
