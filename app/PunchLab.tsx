@@ -15,6 +15,19 @@ import type {
   HandLandmarkerResult,
   NormalizedLandmark,
 } from "@mediapipe/tasks-vision";
+import {
+  averageCalibration,
+  calculateCalibration,
+  calculateDepthRatio,
+  calculatePenetrationCorrection,
+  CAMERA_FOCAL_X_NORMALIZED,
+  DEFAULT_CALIBRATION,
+  handCenter,
+  KNUCKLES,
+  mapLandmarkToScene,
+  type CalibratedHandFrame,
+  type HandCalibration,
+} from "./handMapping";
 
 type Phase = "idle" | "loading" | "calibrating" | "active" | "error";
 
@@ -26,12 +39,7 @@ type SessionStats = {
   best: number;
 };
 
-type Calibration = {
-  midpointX: number;
-  midpointY: number;
-  separation: number;
-  depth: number;
-};
+type Calibration = HandCalibration;
 
 type PunchSample = {
   point: THREE.Vector3;
@@ -46,7 +54,7 @@ type ArenaApi = {
     result: HandLandmarkerResult,
     time: number,
   ) => void;
-  calibrate: (calibration: Calibration) => void;
+  calibrate: (calibration: Calibration) => { cameraDistance: number };
   manualPunch: (x: number, y: number, power?: number) => void;
   enableAudio: () => Promise<void>;
   setAudioEnabled: (enabled: boolean) => void;
@@ -78,8 +86,6 @@ const CONNECTIONS: ReadonlyArray<readonly [number, number]> = [
   [0, 17],
 ];
 
-const KNUCKLES = [5, 9, 13, 17] as const;
-
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
@@ -97,35 +103,6 @@ function isThumbUp(hand: NormalizedLandmark[]) {
   ].filter(([tip, pip]) => hand[tip].y > hand[pip].y - 0.005).length;
   const upright = Math.abs(hand[0].x - hand[9].x) < 0.18;
   return thumbExtended && fingersFolded >= 3 && upright;
-}
-
-function handCenter(hand: NormalizedLandmark[]) {
-  const total = KNUCKLES.reduce(
-    (acc, index) => {
-      acc.x += hand[index].x;
-      acc.y += hand[index].y;
-      acc.z += hand[index].z;
-      return acc;
-    },
-    { x: 0, y: 0, z: 0 },
-  );
-  return {
-    x: total.x / KNUCKLES.length,
-    y: total.y / KNUCKLES.length,
-    z: total.z / KNUCKLES.length,
-  };
-}
-
-function calculateCalibration(hands: NormalizedLandmark[][]): Calibration {
-  const first = handCenter(hands[0]);
-  const second = handCenter(hands[1]);
-  const separation = Math.hypot(first.x - second.x, first.y - second.y);
-  return {
-    midpointX: (first.x + second.x) / 2,
-    midpointY: (first.y + second.y) / 2,
-    separation,
-    depth: (first.z + second.z) / 2,
-  };
 }
 
 function makeLabelTexture(
@@ -519,15 +496,8 @@ function createArena(
   let active = false;
   let squash = 0;
   let disposed = false;
-  let calibratedHandFrame: {
-    midpointX: number;
-    midpointY: number;
-    depth: number;
-    unitsPerImage: number;
-    depthScale: number;
-    bagCenter: THREE.Vector3;
-    guardOffset: number;
-  } | null = null;
+  let calibratedHandFrame: CalibratedHandFrame | null = null;
+  const handDepthScales = [1, 1];
   const cameraTarget = new THREE.Vector3(0, 2.8, 0);
 
   const bagGroup = new THREE.Group();
@@ -670,7 +640,11 @@ function createArena(
     });
     for (let i = 0; i < 21; i += 1) {
       const joint = new THREE.Mesh(
-        new THREE.SphereGeometry(KNUCKLES.includes(i as (typeof KNUCKLES)[number]) ? 0.075 : 0.048, 10, 8),
+        new THREE.SphereGeometry(
+          KNUCKLES.includes(i as (typeof KNUCKLES)[number]) ? 0.045 : 0.03,
+          10,
+          8,
+        ),
         material,
       );
       group.add(joint);
@@ -678,7 +652,7 @@ function createArena(
     }
     for (let i = 0; i < CONNECTIONS.length; i += 1) {
       const bone = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.022, 0.022, 1, 7),
+        new THREE.CylinderGeometry(0.014, 0.014, 1, 7),
         material,
       );
       group.add(bone);
@@ -686,18 +660,19 @@ function createArena(
     }
   });
 
-  function landmarkToWorld(landmark: NormalizedLandmark) {
+  function landmarkToWorld(
+    landmark: NormalizedLandmark,
+    center: ReturnType<typeof handCenter>,
+    depthRatio: number,
+  ) {
     if (calibratedHandFrame) {
-      const frame = calibratedHandFrame;
-      return new THREE.Vector3(
-        frame.bagCenter.x +
-          (frame.midpointX - landmark.x) * frame.unitsPerImage,
-        frame.bagCenter.y +
-          (frame.midpointY - landmark.y) * frame.unitsPerImage,
-        frame.bagCenter.z +
-          frame.guardOffset -
-          (frame.depth - landmark.z) * frame.depthScale,
+      const mapped = mapLandmarkToScene(
+        landmark,
+        center,
+        depthRatio,
+        calibratedHandFrame,
       );
+      return new THREE.Vector3(mapped.x, mapped.y, mapped.z);
     }
     return new THREE.Vector3(
       (0.5 - landmark.x) * 7.35,
@@ -820,10 +795,47 @@ function createArena(
       if (!landmarks) {
         group.visible = false;
         previousHands[handIndex] = null;
+        handDepthScales[handIndex] = 1;
         continue;
       }
       group.visible = true;
-      const positions = landmarks.map(landmarkToWorld);
+      const center = handCenter(landmarks);
+      const frame = calibratedHandFrame;
+      const rawDepthRatio = frame
+        ? calculateDepthRatio(landmarks, frame)
+        : 1;
+      handDepthScales[handIndex] = THREE.MathUtils.lerp(
+        handDepthScales[handIndex],
+        clamp(rawDepthRatio, 0.62, 2.4),
+        0.28,
+      );
+      const positions = landmarks.map((landmark) =>
+        landmarkToWorld(landmark, center, handDepthScales[handIndex]),
+      );
+
+      const rawFist = KNUCKLES.reduce(
+        (fistCenter, index) => fistCenter.add(positions[index]),
+        new THREE.Vector3(),
+      ).multiplyScalar(1 / KNUCKLES.length);
+      if (active) {
+        const correction = calculatePenetrationCorrection(
+          rawFist,
+          {
+            x: bagBody.position.x,
+            y: bagBody.position.y,
+            z: bagBody.position.z,
+          },
+          bagRadius,
+          bagHeight,
+        );
+        if (correction > 0) {
+          positions.forEach((position) => {
+            position.z += correction;
+          });
+          rawFist.z += correction;
+        }
+      }
+
       positions.forEach((position, index) => {
         handJoints[handIndex][index].position.copy(position);
       });
@@ -835,10 +847,6 @@ function createArena(
         );
       });
 
-      const rawFist = KNUCKLES.reduce(
-        (center, index) => center.add(positions[index]),
-        new THREE.Vector3(),
-      ).multiplyScalar(1 / KNUCKLES.length);
       const previous = previousHands[handIndex];
       const fist = previous
         ? previous.point.clone().lerp(rawFist, 0.44)
@@ -868,13 +876,13 @@ function createArena(
 
       if (!active || !previous || time - lastHits[handIndex] < 360) continue;
       const verticalInside = Math.abs(localToBag.y) < bagHeight * 0.58;
-      const fastEnough = speed > 1.72;
-      const nearSurface = radialDistance < bagRadius + 0.25;
-      const crossedSurface = previous.distance >= bagRadius + 0.25;
+      const fastEnough = speed > 1.05;
+      const nearSurface = radialDistance < bagRadius + 0.12;
+      const crossedSurface = previous.distance >= bagRadius + 0.1;
       const closingSpeed = velocity.dot(
         bagCenter.clone().sub(fist).normalize(),
       );
-      const approaching = closingSpeed > 1.05;
+      const approaching = closingSpeed > 0.72;
       if (
         verticalInside &&
         fastEnough &&
@@ -990,26 +998,53 @@ function createArena(
   return {
     setTrackingResult: updateHands,
     calibrate(calibration) {
-      const scale = clamp(0.87 + (calibration.separation - 0.16) * 1.45, 0.82, 1.22);
-      const x = clamp((0.5 - calibration.midpointX) * 3.6, -1.55, 1.55);
-      const y = clamp(3.0 + (0.48 - calibration.midpointY) * 1.45, 2.62, 3.42);
-      const z = clamp(-calibration.depth * 2.8, -0.45, 0.55);
+      const cameraDistance = clamp(calibration.cameraDistance, 0.42, 1.35);
+      const unitsPerImage = clamp(
+        cameraDistance / CAMERA_FOCAL_X_NORMALIZED,
+        0.52,
+        1.5,
+      );
+      const scale = clamp(
+        0.9 + (cameraDistance - 0.78) * 0.06,
+        0.86,
+        0.96,
+      );
+      const x = clamp(
+        (0.5 - calibration.midpointX) * unitsPerImage * 1.2,
+        -0.8,
+        0.8,
+      );
+      const y = clamp(
+        3.02 +
+          ((0.48 - calibration.midpointY) * unitsPerImage * 0.75) /
+            calibration.aspect,
+        2.78,
+        3.28,
+      );
+      const z = clamp((0.78 - cameraDistance) * 1.35, -0.78, 0.48);
       setupPhysics(scale, x, y, z);
-      const unitsPerImage = clamp(1.25 / Math.max(calibration.separation, 0.12), 4.2, 7.4);
+      const guardGap = clamp(cameraDistance * 0.48, 0.34, 0.52);
+      const expectedPunchTravel = clamp(cameraDistance * 0.3, 0.18, 0.32);
       calibratedHandFrame = {
         midpointX: calibration.midpointX,
         midpointY: calibration.midpointY,
-        depth: calibration.depth,
+        aspect: calibration.aspect,
+        palmPairs: [...calibration.palmPairs],
+        cameraDistance,
         unitsPerImage,
-        depthScale: clamp(unitsPerImage * 2.15, 9.0, 15.0),
-        bagCenter: new THREE.Vector3(x, y, z),
-        guardOffset: bagRadius + 0.48,
+        bagCenter: { x, y, z },
+        bagRadius,
+        guardGap,
+        punchGain: guardGap / expectedPunchTravel,
       };
       previousHands[0] = null;
       previousHands[1] = null;
+      handDepthScales[0] = 1;
+      handDepthScales[1] = 1;
       active = true;
       bagBody.wakeUp();
       bagBody.applyImpulse(new CANNON.Vec3(0.7, 0, 0.18));
+      return { cameraDistance };
     },
     manualPunch(x, y, power = 1) {
       active = true;
@@ -1067,6 +1102,8 @@ export default function PunchLab() {
   const trackingFrameRef = useRef(0);
   const previousVideoTimeRef = useRef(-1);
   const thumbsStartRef = useRef<number | null>(null);
+  const calibrationSamplesRef = useRef<Calibration[]>([]);
+  const calibrationLockedRef = useRef(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [statusText, setStatusText] = useState("Camera is off");
   const [handsDetected, setHandsDetected] = useState(0);
@@ -1187,18 +1224,38 @@ export default function PunchLab() {
             result.landmarks.length === 2 &&
             result.landmarks.every((hand) => isThumbUp(hand));
           if (ready) {
-            if (thumbsStartRef.current === null) thumbsStartRef.current = now;
+            const aspect =
+              (video.videoWidth || 1280) / (video.videoHeight || 720);
+            const sample = calculateCalibration(result.landmarks, aspect);
+            calibrationSamplesRef.current.push(sample);
+            if (calibrationSamplesRef.current.length > 45) {
+              calibrationSamplesRef.current.shift();
+            }
+            if (thumbsStartRef.current === null) {
+              thumbsStartRef.current = now;
+              calibrationSamplesRef.current = [sample];
+            }
             const progress = clamp((now - thumbsStartRef.current) / 900, 0, 1);
             setThumbProgress(progress);
             setStatusText(progress < 1 ? "Hold that pose" : "Range locked");
-            if (progress >= 1) {
-              arenaRef.current?.calibrate(calculateCalibration(result.landmarks));
+            if (progress >= 1 && !calibrationLockedRef.current) {
+              calibrationLockedRef.current = true;
+              const calibration = averageCalibration(
+                calibrationSamplesRef.current,
+              );
+              const mapped = arenaRef.current?.calibrate(calibration);
               setPhase("active");
-              setStatusText("Bag mapped — throw a punch");
+              setStatusText(
+                mapped
+                  ? `Range mapped at ${Math.round(mapped.cameraDistance * 100)} cm — punch forward`
+                  : "Bag mapped — punch forward",
+              );
               setThumbProgress(1);
             }
           } else {
             thumbsStartRef.current = null;
+            calibrationSamplesRef.current = [];
+            calibrationLockedRef.current = false;
             setThumbProgress(0);
             setStatusText(
               result.landmarks.length < 2
@@ -1270,29 +1327,21 @@ export default function PunchLab() {
       }
       setCameraLive(true);
       arenaRef.current?.setHitDetection(false);
+      calibrationSamplesRef.current = [];
+      calibrationLockedRef.current = false;
       setPhase("calibrating");
       setStatusText("Bring both hands into frame");
     } catch (error) {
       console.error(error);
       setPhase("active");
       setStatusText("Camera unavailable · manual sparring enabled");
-      arenaRef.current?.calibrate({
-        midpointX: 0.5,
-        midpointY: 0.5,
-        separation: 0.28,
-        depth: 0,
-      });
+      arenaRef.current?.calibrate(DEFAULT_CALIBRATION);
     }
   }, []);
 
   const useManualMode = useCallback(async () => {
     await arenaRef.current?.enableAudio();
-    arenaRef.current?.calibrate({
-      midpointX: 0.5,
-      midpointY: 0.5,
-      separation: 0.28,
-      depth: 0,
-    });
+    arenaRef.current?.calibrate(DEFAULT_CALIBRATION);
     setPhase("active");
     setStatusText("Manual sparring · swipe or tap the bag");
   }, []);
@@ -1308,12 +1357,16 @@ export default function PunchLab() {
     setPhase("idle");
     setStatusText("Camera is off");
     setThumbProgress(0);
+    calibrationSamplesRef.current = [];
+    calibrationLockedRef.current = false;
   }, []);
 
   const recalibrate = useCallback(() => {
     arenaRef.current?.setHitDetection(false);
     thumbsStartRef.current = null;
     previousVideoTimeRef.current = -1;
+    calibrationSamplesRef.current = [];
+    calibrationLockedRef.current = false;
     setThumbProgress(0);
     setHandsDetected(0);
     setPhase("calibrating");
