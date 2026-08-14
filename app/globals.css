@@ -596,6 +596,16 @@ button {
   font-size: 6px;
 }
 
+.camera-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.camera-actions button:first-child {
+  color: var(--mint);
+}
+
 .calibration-card {
   position: absolute;
   z-index: 4;
@@ -888,6 +898,10 @@ button {
     top: 71px;
     right: 9px;
     width: 98px;
+  }
+
+  .experience-shell:not([data-phase="active"]) .stats-rail {
+    display: none;
   }
 
   .stat-block {

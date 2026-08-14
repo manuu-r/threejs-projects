@@ -37,6 +37,7 @@ type PunchSample = {
   point: THREE.Vector3;
   velocity: THREE.Vector3;
   speed: number;
+  distance: number;
   at: number;
 };
 
@@ -49,6 +50,7 @@ type ArenaApi = {
   manualPunch: (x: number, y: number, power?: number) => void;
   enableAudio: () => Promise<void>;
   setAudioEnabled: (enabled: boolean) => void;
+  setHitDetection: (enabled: boolean) => void;
   dispose: () => void;
 };
 
@@ -517,6 +519,16 @@ function createArena(
   let active = false;
   let squash = 0;
   let disposed = false;
+  let calibratedHandFrame: {
+    midpointX: number;
+    midpointY: number;
+    depth: number;
+    unitsPerImage: number;
+    depthScale: number;
+    bagCenter: THREE.Vector3;
+    guardOffset: number;
+  } | null = null;
+  const cameraTarget = new THREE.Vector3(0, 2.8, 0);
 
   const bagGroup = new THREE.Group();
   scene.add(bagGroup);
@@ -675,10 +687,22 @@ function createArena(
   });
 
   function landmarkToWorld(landmark: NormalizedLandmark) {
+    if (calibratedHandFrame) {
+      const frame = calibratedHandFrame;
+      return new THREE.Vector3(
+        frame.bagCenter.x +
+          (frame.midpointX - landmark.x) * frame.unitsPerImage,
+        frame.bagCenter.y +
+          (frame.midpointY - landmark.y) * frame.unitsPerImage,
+        frame.bagCenter.z +
+          frame.guardOffset -
+          (frame.depth - landmark.z) * frame.depthScale,
+      );
+    }
     return new THREE.Vector3(
       (0.5 - landmark.x) * 7.35,
       (0.55 - landmark.y) * 5.2 + 2.05,
-      landmark.z * 9.2 + 0.08,
+      landmark.z * 9.2 + 0.85,
     );
   }
 
@@ -811,24 +835,22 @@ function createArena(
         );
       });
 
-      const fist = KNUCKLES.reduce(
+      const rawFist = KNUCKLES.reduce(
         (center, index) => center.add(positions[index]),
         new THREE.Vector3(),
       ).multiplyScalar(1 / KNUCKLES.length);
       const previous = previousHands[handIndex];
+      const fist = previous
+        ? previous.point.clone().lerp(rawFist, 0.44)
+        : rawFist;
       const dt = previous ? clamp((time - previous.at) / 1000, 1 / 120, 0.12) : 1 / 60;
-      const velocity = previous
+      const rawVelocity = previous
         ? fist.clone().sub(previous.point).divideScalar(dt)
         : new THREE.Vector3();
+      const velocity = previous
+        ? previous.velocity.clone().lerp(rawVelocity, 0.34)
+        : rawVelocity;
       const speed = velocity.length();
-      previousHands[handIndex] = {
-        point: fist.clone(),
-        velocity: velocity.clone(),
-        speed,
-        at: time,
-      };
-
-      if (!active || !previous || time - lastHits[handIndex] < 280) continue;
       const bagCenter = new THREE.Vector3(
         bagBody.position.x,
         bagBody.position.y,
@@ -836,11 +858,30 @@ function createArena(
       );
       const localToBag = fist.clone().sub(bagCenter);
       const radialDistance = Math.hypot(localToBag.x, localToBag.z);
+      previousHands[handIndex] = {
+        point: fist.clone(),
+        velocity: velocity.clone(),
+        speed,
+        distance: radialDistance,
+        at: time,
+      };
+
+      if (!active || !previous || time - lastHits[handIndex] < 360) continue;
       const verticalInside = Math.abs(localToBag.y) < bagHeight * 0.58;
-      const fastEnough = speed > 1.18;
-      const nearSurface = radialDistance < bagRadius + 0.34;
-      const approaching = velocity.dot(bagCenter.clone().sub(fist)) > 0.12;
-      if (verticalInside && fastEnough && nearSurface && approaching) {
+      const fastEnough = speed > 1.72;
+      const nearSurface = radialDistance < bagRadius + 0.25;
+      const crossedSurface = previous.distance >= bagRadius + 0.25;
+      const closingSpeed = velocity.dot(
+        bagCenter.clone().sub(fist).normalize(),
+      );
+      const approaching = closingSpeed > 1.05;
+      if (
+        verticalInside &&
+        fastEnough &&
+        nearSurface &&
+        crossedSurface &&
+        approaching
+      ) {
         lastHits[handIndex] = time;
         applyPunch(fist, velocity, speed);
       }
@@ -915,10 +956,23 @@ function createArena(
     }
     camera.position.x = THREE.MathUtils.lerp(
       camera.position.x,
-      0.15 + bagBody.position.x * 0.018,
-      0.018,
+      0.15 + bagBody.position.x * 0.12,
+      0.025,
     );
-    camera.lookAt(0, 2.8, 0);
+    camera.position.z = THREE.MathUtils.lerp(
+      camera.position.z,
+      9.1 + bagBody.position.z * 0.16,
+      0.025,
+    );
+    cameraTarget.lerp(
+      new THREE.Vector3(
+        bagBody.position.x * 0.48,
+        2.8 + (bagBody.position.y - 3.02) * 0.16,
+        bagBody.position.z,
+      ),
+      0.035,
+    );
+    camera.lookAt(cameraTarget);
     renderer.render(scene, camera);
   }
   frameId = requestAnimationFrame(animate);
@@ -939,8 +993,20 @@ function createArena(
       const scale = clamp(0.87 + (calibration.separation - 0.16) * 1.45, 0.82, 1.22);
       const x = clamp((0.5 - calibration.midpointX) * 3.6, -1.55, 1.55);
       const y = clamp(3.0 + (0.48 - calibration.midpointY) * 1.45, 2.62, 3.42);
-      const z = clamp(calibration.depth * 5.4, -0.65, 0.55);
+      const z = clamp(-calibration.depth * 2.8, -0.45, 0.55);
       setupPhysics(scale, x, y, z);
+      const unitsPerImage = clamp(1.25 / Math.max(calibration.separation, 0.12), 4.2, 7.4);
+      calibratedHandFrame = {
+        midpointX: calibration.midpointX,
+        midpointY: calibration.midpointY,
+        depth: calibration.depth,
+        unitsPerImage,
+        depthScale: clamp(unitsPerImage * 2.15, 9.0, 15.0),
+        bagCenter: new THREE.Vector3(x, y, z),
+        guardOffset: bagRadius + 0.48,
+      };
+      previousHands[0] = null;
+      previousHands[1] = null;
       active = true;
       bagBody.wakeUp();
       bagBody.applyImpulse(new CANNON.Vec3(0.7, 0, 0.18));
@@ -964,6 +1030,11 @@ function createArena(
     setAudioEnabled(enabled) {
       audioEnabled = enabled;
       if (!enabled && impactAudio.isPlaying) impactAudio.stop();
+    },
+    setHitDetection(enabled) {
+      active = enabled;
+      previousHands[0] = null;
+      previousHands[1] = null;
     },
     dispose() {
       disposed = true;
@@ -1198,6 +1269,7 @@ export default function PunchLab() {
         });
       }
       setCameraLive(true);
+      arenaRef.current?.setHitDetection(false);
       setPhase("calibrating");
       setStatusText("Bring both hands into frame");
     } catch (error) {
@@ -1236,6 +1308,17 @@ export default function PunchLab() {
     setPhase("idle");
     setStatusText("Camera is off");
     setThumbProgress(0);
+  }, []);
+
+  const recalibrate = useCallback(() => {
+    arenaRef.current?.setHitDetection(false);
+    thumbsStartRef.current = null;
+    previousVideoTimeRef.current = -1;
+    setThumbProgress(0);
+    setHandsDetected(0);
+    setPhase("calibrating");
+    setStatusText("Bring both hands into frame");
+    setCameraExpanded(true);
   }, []);
 
   useEffect(() => () => stopCamera(), [stopCamera]);
@@ -1453,9 +1536,16 @@ export default function PunchLab() {
         <div className="camera-status" data-testid="camera-status">
           <span>{statusText}</span>
           {cameraLive && (
-            <button type="button" onClick={stopCamera}>
-              STOP
-            </button>
+            <div className="camera-actions">
+              {phase === "active" && (
+                <button type="button" onClick={recalibrate}>
+                  RECAL
+                </button>
+              )}
+              <button type="button" onClick={stopCamera}>
+                STOP
+              </button>
+            </div>
           )}
           {!cameraLive && phase === "active" && (
             <button type="button" onClick={startCamera}>
