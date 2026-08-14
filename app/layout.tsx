@@ -18,28 +18,19 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     metadataBase: new URL(origin),
     title: {
-      default: "Kinetiq Punch Lab",
-      template: "%s · Kinetiq",
+      default: "Punch Challenge",
+      template: "%s · Punch Challenge",
     },
     description,
     openGraph: {
-      title: "Kinetiq Punch Lab",
+      title: "Punch Challenge",
       description,
       type: "website",
-      images: [
-        {
-          url: `${origin}/og.png`,
-          width: 1672,
-          height: 936,
-          alt: "Kinetiq Punch Lab — a red heavy bag in an industrial boxing gym",
-        },
-      ],
     },
     twitter: {
-      card: "summary_large_image",
-      title: "Kinetiq Punch Lab",
+      card: "summary",
+      title: "Punch Challenge",
       description,
-      images: [`${origin}/og.png`],
     },
   };
 }

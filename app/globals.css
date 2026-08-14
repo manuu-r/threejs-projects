@@ -54,8 +54,9 @@ button {
   inset: 0;
   width: 100%;
   height: 100%;
-  touch-action: none;
-  cursor: crosshair;
+  pointer-events: none;
+  touch-action: auto;
+  cursor: default;
 }
 
 .vignette,
@@ -107,50 +108,69 @@ button {
   background: rgba(5, 7, 8, 0.66);
 }
 
-.brand-lockup,
+.glove-lockup,
 .system-strip,
 .physics-tags,
-.manual-hint,
 .camera-head > div,
 .detection-row {
   display: flex;
   align-items: center;
 }
 
-.brand-lockup {
-  gap: 12px;
+.glove-lockup {
+  min-width: 48px;
 }
 
-.brand-mark {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  transform: skewX(-9deg);
-  border: 2px solid var(--red);
-  color: var(--red);
-  font-weight: 950;
-  font-style: italic;
-  font-size: 19px;
-  line-height: 1;
+.glove-logo {
+  position: relative;
+  display: block;
+  width: 43px;
+  height: 43px;
+  transform: rotate(-10deg);
+  filter: drop-shadow(0 0 12px rgba(239, 63, 63, 0.28));
 }
 
-.brand-word {
-  font-weight: 950;
-  font-size: 17px;
-  letter-spacing: 0.18em;
+.glove-logo-shape,
+.glove-logo-cuff {
+  position: absolute;
+  display: block;
+  background: var(--red);
 }
 
-.brand-divider {
-  width: 1px;
-  height: 22px;
-  background: var(--line);
+.glove-logo-shape {
+  top: 3px;
+  left: 7px;
+  width: 29px;
+  height: 27px;
+  border: 2px solid rgba(255, 255, 255, 0.42);
+  border-radius: 52% 48% 46% 54% / 44% 51% 49% 56%;
+  box-shadow: inset -5px -5px 0 rgba(78, 4, 8, 0.28);
 }
 
-.brand-sub,
+.glove-logo-shape::after {
+  position: absolute;
+  bottom: -2px;
+  left: -8px;
+  width: 13px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.34);
+  border-radius: 65% 35% 55% 45%;
+  background: var(--red);
+  content: "";
+}
+
+.glove-logo-cuff {
+  right: 7px;
+  bottom: 1px;
+  width: 23px;
+  height: 12px;
+  border-top: 2px solid rgba(255, 255, 255, 0.42);
+  border-radius: 2px 2px 6px 6px;
+  background: #98141b;
+}
+
 .system-strip,
 .physics-tags,
-.manual-hint,
 .card-index,
 .detection-row,
 .camera-head,
@@ -162,12 +182,6 @@ button {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-}
-
-.brand-sub {
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 700;
 }
 
 .system-strip {
@@ -324,19 +338,6 @@ button {
   font-size: 17px;
 }
 
-.text-button {
-  padding: 10px 0;
-  border: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.34);
-  background: none;
-  color: rgba(242, 238, 227, 0.63);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  cursor: pointer;
-}
-
 .privacy-note {
   display: flex;
   align-items: center;
@@ -364,26 +365,119 @@ button {
 .stats-rail {
   position: absolute;
   z-index: 4;
-  top: 104px;
+  top: 92px;
   right: 38px;
-  width: 132px;
+  width: 204px;
   border-top: 2px solid var(--red);
   background: linear-gradient(180deg, rgba(8, 10, 11, 0.72), rgba(8, 10, 11, 0.3));
   backdrop-filter: blur(8px);
 }
 
+.challenge-card {
+  position: relative;
+  display: grid;
+  min-height: 192px;
+  align-content: center;
+  padding: 20px 18px 17px;
+  overflow: visible;
+  border-right: 1px solid rgba(239, 63, 63, 0.22);
+  border-bottom: 1px solid var(--line);
+  border-left: 1px solid rgba(239, 63, 63, 0.22);
+  background:
+    linear-gradient(135deg, rgba(239, 63, 63, 0.16), transparent 58%),
+    rgba(8, 10, 11, 0.74);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-transform: uppercase;
+}
+
+.challenge-kicker,
+.challenge-launch,
+.challenge-details {
+  letter-spacing: 0.11em;
+}
+
+.challenge-kicker {
+  color: rgba(242, 238, 227, 0.6);
+  font-size: 8px;
+  font-weight: 850;
+}
+
+.challenge-score {
+  margin-top: 6px;
+  color: rgba(255, 246, 223, 0.82);
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.035em;
+}
+
+.challenge-prize {
+  display: grid;
+  margin-top: 10px;
+  padding: 11px 10px 10px;
+  border: 1px solid rgba(255, 84, 90, 0.54);
+  border-left: 3px solid var(--red);
+  background:
+    linear-gradient(135deg, rgba(239, 63, 63, 0.3), rgba(239, 63, 63, 0.06)),
+    rgba(255, 255, 255, 0.025);
+  box-shadow: 0 8px 28px rgba(140, 8, 15, 0.16);
+}
+
+.challenge-prize strong {
+  display: grid;
+  color: #fff8e9;
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 0.92;
+  letter-spacing: 0.025em;
+  text-shadow: 0 2px 16px rgba(255, 63, 70, 0.3);
+}
+
+.challenge-launch {
+  margin-top: 8px;
+  color: rgba(255, 207, 209, 0.74);
+  font-size: 7.2px;
+  font-weight: 900;
+}
+
+.challenge-details {
+  margin-top: 11px;
+  color: rgba(242, 238, 227, 0.58);
+  font-size: 7.2px;
+  font-weight: 750;
+  line-height: 1.55;
+}
+
+.proof-code {
+  position: absolute;
+  top: -10px;
+  right: -8px;
+  min-width: 38px;
+  padding: 3px 5px;
+  transform: rotate(3deg);
+  border: 1px solid rgba(239, 63, 63, 0.68);
+  background: #090a0b;
+  color: rgba(255, 87, 87, 0.92);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-align: center;
+}
+
 .stat-block {
   display: grid;
-  min-height: 96px;
+  min-height: 104px;
   align-content: center;
-  padding: 12px 15px;
+  padding: 14px 18px;
   border-bottom: 1px solid var(--line);
 }
 
 .stat-block strong {
   margin-top: 5px;
   font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
-  font-size: 37px;
+  font-size: 42px;
   font-weight: 500;
   line-height: 0.9;
   letter-spacing: 0.02em;
@@ -744,27 +838,6 @@ button {
   background: var(--red);
 }
 
-.manual-hint {
-  gap: 6px;
-  color: rgba(235, 232, 222, 0.32);
-  font-size: 6px;
-}
-
-.manual-hint kbd {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  place-items: center;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(235, 232, 222, 0.62);
-  font-size: 7px;
-}
-
-.manual-hint span {
-  margin-left: 4px;
-}
-
 @keyframes panel-in {
   from {
     opacity: 0;
@@ -804,12 +877,7 @@ button {
     padding-left: 18px;
   }
 
-  .system-strip > span:nth-of-type(n + 3),
-  .system-rule,
-  .brand-divider,
-  .brand-sub,
-  .physics-tags span:nth-child(n + 2),
-  .manual-hint {
+  .physics-tags span:nth-child(n + 2) {
     display: none;
   }
 
@@ -843,14 +911,11 @@ button {
     height: 60px;
   }
 
-  .brand-mark {
-    width: 29px;
-    height: 29px;
-    font-size: 16px;
-  }
-
-  .brand-word {
-    font-size: 14px;
+  .glove-logo {
+    width: 37px;
+    height: 37px;
+    transform: rotate(-10deg) scale(0.88);
+    transform-origin: left center;
   }
 
   .system-strip > span:not(.system-dot),
@@ -897,7 +962,7 @@ button {
   .stats-rail {
     top: 71px;
     right: 9px;
-    width: 98px;
+    width: 142px;
   }
 
   .experience-shell:not([data-phase="active"]) .stats-rail {
@@ -920,6 +985,34 @@ button {
 
   .best-readout {
     display: none;
+  }
+
+  .challenge-card {
+    min-height: 170px;
+    padding: 15px 12px 13px;
+  }
+
+  .challenge-score {
+    font-size: 15px;
+  }
+
+  .challenge-prize {
+    margin-top: 8px;
+    padding: 9px 8px 8px;
+  }
+
+  .challenge-prize strong {
+    font-size: 17px;
+  }
+
+  .challenge-launch {
+    margin-top: 6px;
+    font-size: 6.3px;
+  }
+
+  .challenge-details {
+    margin-top: 8px;
+    font-size: 6.3px;
   }
 
   .camera-card {

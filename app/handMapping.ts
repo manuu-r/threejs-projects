@@ -30,6 +30,33 @@ export type CalibratedHandFrame = {
 export const KNUCKLES = [5, 9, 13, 17] as const;
 export const CAMERA_FOCAL_X_NORMALIZED = 0.9;
 
+// The palm and metacarpophalangeal joints carry most of the hand's rigid-body
+// motion. Distal joints still contribute, but with lower weight so an opening
+// finger or a single noisy fingertip cannot manufacture a punch.
+export const WHOLE_HAND_MOTION_WEIGHTS = [
+  0.8,
+  0.75,
+  0.9,
+  0.75,
+  0.6,
+  1.9,
+  1.35,
+  0.9,
+  0.72,
+  2.2,
+  1.5,
+  1,
+  0.8,
+  2,
+  1.4,
+  0.95,
+  0.76,
+  1.75,
+  1.25,
+  0.85,
+  0.68,
+] as const;
+
 const ASSUMED_WRIST_TO_MIDDLE_MCP_METERS = 0.1;
 const PALM_DEPTH_PAIRS: ReadonlyArray<readonly [number, number]> = [
   [0, 9],
@@ -76,6 +103,94 @@ function median(values: number[]) {
   return sorted.length % 2
     ? sorted[middle]
     : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function weightedPointAverage(points: HandPoint[], indices?: number[]) {
+  const selected = indices ?? points.map((_, index) => index);
+  const total = selected.reduce(
+    (acc, index) => {
+      const point = points[index];
+      if (!point) return acc;
+      const weight = WHOLE_HAND_MOTION_WEIGHTS[index] ?? 1;
+      acc.x += point.x * weight;
+      acc.y += point.y * weight;
+      acc.z += point.z * weight;
+      acc.weight += weight;
+      return acc;
+    },
+    { x: 0, y: 0, z: 0, weight: 0 },
+  );
+  const divisor = Math.max(total.weight, 0.001);
+  return {
+    x: total.x / divisor,
+    y: total.y / divisor,
+    z: total.z / divisor,
+  };
+}
+
+export function wholeHandMotionCenter(hand: HandPoint[]) {
+  return weightedPointAverage(hand);
+}
+
+export function calculateWholeHandVelocity(
+  current: HandPoint[],
+  previous: HandPoint[],
+  elapsedSeconds: number,
+) {
+  const dt = clamp(elapsedSeconds, 1 / 120, 0.12);
+  const count = Math.min(current.length, previous.length, 21);
+  if (count === 0) return { x: 0, y: 0, z: 0 };
+
+  const velocities = Array.from({ length: count }, (_, index) => ({
+    x: (current[index].x - previous[index].x) / dt,
+    y: (current[index].y - previous[index].y) / dt,
+    z: (current[index].z - previous[index].z) / dt,
+  }));
+  const provisional = weightedPointAverage(velocities);
+  const deviations = velocities.map((velocity) =>
+    Math.hypot(
+      velocity.x - provisional.x,
+      velocity.y - provisional.y,
+      velocity.z - provisional.z,
+    ),
+  );
+  const cutoff = Math.max(0.24, median(deviations) * 2.8);
+  const stableIndices = deviations
+    .map((deviation, index) => ({ deviation, index }))
+    .filter(({ deviation }) => deviation <= cutoff)
+    .map(({ index }) => index);
+
+  return weightedPointAverage(
+    velocities,
+    stableIndices.length >= Math.ceil(count * 0.55)
+      ? stableIndices
+      : undefined,
+  );
+}
+
+export function fuseForearmVelocity(
+  handVelocity: HandPoint,
+  currentForearm: HandPoint | null,
+  previousForearm: HandPoint | null,
+  elapsedSeconds: number,
+  blend = 0.22,
+) {
+  if (!currentForearm || !previousForearm) return { ...handVelocity };
+  const dt = clamp(elapsedSeconds, 1 / 120, 0.12);
+  const forearmVelocity = {
+    x: (currentForearm.x - previousForearm.x) / dt,
+    y: (currentForearm.y - previousForearm.y) / dt,
+    z: (currentForearm.z - previousForearm.z) / dt,
+  };
+  if (Math.hypot(forearmVelocity.x, forearmVelocity.y, forearmVelocity.z) >= 12) {
+    return { ...handVelocity };
+  }
+  const forearmBlend = clamp(blend, 0, 0.4);
+  return {
+    x: handVelocity.x * (1 - forearmBlend) + forearmVelocity.x * forearmBlend,
+    y: handVelocity.y * (1 - forearmBlend) + forearmVelocity.y * forearmBlend,
+    z: handVelocity.z * (1 - forearmBlend) + forearmVelocity.z * forearmBlend,
+  };
 }
 
 export function calculateCalibration(
@@ -184,7 +299,7 @@ export function calculatePenetrationCorrection(
   bagCenter: HandPoint,
   bagRadius: number,
   bagHeight: number,
-  maximumPenetration = 0.075,
+  maximumPenetration = 0.018,
 ) {
   const deltaX = fist.x - bagCenter.x;
   const verticalInside = Math.abs(fist.y - bagCenter.y) < bagHeight * 0.58;

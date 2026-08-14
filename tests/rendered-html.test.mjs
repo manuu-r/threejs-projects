@@ -25,19 +25,27 @@ async function render() {
   );
 }
 
-test("server-renders the finished Kinetiq experience", async () => {
+test("server-renders the finished punch challenge", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>Punch Lab · Kinetiq<\/title>/i);
+  assert.match(html, /<title>Punch Challenge<\/title>/i);
   assert.match(html, /YOUR HANDS\./);
   assert.match(html, /REAL IMPACT\./);
   assert.match(html, /START CAMERA/);
-  assert.match(html, /PRACTICE WITHOUT CAMERA/);
-  assert.match(html, /MEDIAPIPE \/ LIVE/);
+  assert.doesNotMatch(html, /PRACTICE WITHOUT CAMERA|swipe to test|manual sparring/i);
+  assert.match(html, /HAND TRACKING/);
+  assert.match(html, /21 LANDMARKS \/ HAND/);
+  assert.doesNotMatch(html, /FOREARM|ELBOW|SHOULDER/i);
+  assert.match(html, /FIRST 20 TO SCORE/);
+  assert.match(html, /1501 N/);
+  assert.match(html, /1 YEAR OF/);
+  assert.match(html, /SPARCD FREE/);
+  assert.match(html, /AT LAUNCH/);
   assert.match(html, /data-testid="start-camera"/);
+  assert.doesNotMatch(html, /KINETIQ|THREE\.JS \/ CANNON-ES/i);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Building your site/i);
 });
 
@@ -50,9 +58,32 @@ test("ships the local tracking model and visual assets", async () => {
 
   await Promise.all([
     access(new URL("public/mediapipe/models/hand_landmarker.task", projectRoot)),
+    access(new URL("public/mediapipe/models/pose_landmarker_lite.task", projectRoot)),
     access(new URL("public/assets/machine_shop_02_1k.hdr", projectRoot)),
     access(new URL("public/assets/rubber_tiles_diff_1k.jpg", projectRoot)),
-    access(new URL("public/og.png", projectRoot)),
+    access(new URL("public/assets/hands/left.glb", projectRoot)),
+    access(new URL("public/assets/hands/right.glb", projectRoot)),
   ]);
   await assert.rejects(access(new URL("app/_sites-preview", projectRoot)));
+});
+
+test("keeps punching camera-only", async () => {
+  const [component, styles] = await Promise.all([
+    readFile(new URL("app/PunchLab.tsx", projectRoot), "utf8"),
+    readFile(new URL("app/globals.css", projectRoot), "utf8"),
+  ]);
+
+  assert.doesNotMatch(
+    component,
+    /manualPunch|onPointerDown|onPointerUp|addEventListener\(["']keydown|DEFAULT_CALIBRATION/,
+  );
+  assert.match(component, /const HAND_SIZE_GAIN = 1\.4/);
+  assert.match(component, /PoseLandmarker\.createFromOptions/);
+  assert.match(component, /setPoseResult: updatePose/);
+  assert.doesNotMatch(component, /upperArm/);
+  assert.doesNotMatch(component, /armGroups|armSurfaces/);
+  assert.match(component, /GLTFLoader/);
+  assert.match(component, /\/assets\/hands\/left\.glb/);
+  assert.doesNotMatch(component, /const armConnections|FOREARMS DETECTED|Keep both elbows/);
+  assert.match(styles, /\.arena-canvas\s*\{[^}]*pointer-events:\s*none;/s);
 });

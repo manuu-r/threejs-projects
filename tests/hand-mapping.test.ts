@@ -4,8 +4,11 @@ import {
   calculateCalibration,
   calculateDepthRatio,
   calculatePenetrationCorrection,
+  calculateWholeHandVelocity,
+  fuseForearmVelocity,
   handCenter,
   mapLandmarkToScene,
+  wholeHandMotionCenter,
   type CalibratedHandFrame,
   type HandPoint,
 } from "../app/handMapping.ts";
@@ -123,11 +126,63 @@ test("a fist may compress the surface but cannot pass through the bag", () => {
     2.2,
   );
   const correctedZ = deeplyInside.z + correction;
-  assert.ok(Math.abs(correctedZ - (0.535 - 0.075)) < 1e-9);
+  assert.ok(Math.abs(correctedZ - (0.535 - 0.018)) < 1e-9);
 
   const missedBag = { x: 0.8, y: 3, z: -0.4 };
   assert.equal(
     calculatePenetrationCorrection(missedBag, bagCenter, 0.5, 2.2),
     0,
   );
+});
+
+test("whole-hand motion follows the palm while rejecting one noisy fingertip", () => {
+  const previous = makeHand(0.5);
+  const current = previous.map((point) => ({
+    x: point.x + 0.012,
+    y: point.y - 0.006,
+    z: point.z - 0.03,
+  }));
+  current[8] = { x: 1.8, y: -1.2, z: 0.9 };
+
+  const velocity = calculateWholeHandVelocity(current, previous, 0.03);
+  assert.ok(Math.abs(velocity.x - 0.4) < 0.08);
+  assert.ok(Math.abs(velocity.y + 0.2) < 0.08);
+  assert.ok(Math.abs(velocity.z + 1) < 0.08);
+});
+
+test("whole-hand center translates consistently for open and closed hands", () => {
+  const hand = makeHand(0.5);
+  const before = wholeHandMotionCenter(hand);
+  const translated = hand.map((point, index) => ({
+    x: point.x - 0.04,
+    y: point.y + 0.025,
+    z: point.z - 0.08 + (index % 4 === 0 ? 0.002 : 0),
+  }));
+  const after = wholeHandMotionCenter(translated);
+
+  assert.ok(Math.abs(after.x - before.x + 0.04) < 1e-9);
+  assert.ok(Math.abs(after.y - before.y - 0.025) < 1e-9);
+  assert.ok(Math.abs(after.z - before.z + 0.08) < 0.001);
+});
+
+test("forearm motion stabilizes punch velocity and rejects pose spikes", () => {
+  const handVelocity = { x: 0.3, y: 0.1, z: -1.2 };
+  const previousForearm = { x: 0, y: 0, z: 0 };
+  const currentForearm = { x: 0.006, y: 0, z: -0.027 };
+  const fused = fuseForearmVelocity(
+    handVelocity,
+    currentForearm,
+    previousForearm,
+    0.03,
+  );
+  assert.ok(fused.z > handVelocity.z);
+  assert.ok(fused.z < -0.9);
+
+  const poseSpike = fuseForearmVelocity(
+    handVelocity,
+    { x: 2, y: -1, z: 1 },
+    previousForearm,
+    0.03,
+  );
+  assert.deepEqual(poseSpike, handVelocity);
 });

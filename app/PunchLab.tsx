@@ -9,19 +9,24 @@ import {
 } from "react";
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { HDRLoader } from "three/examples/jsm/loaders/HDRLoader.js";
+import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
 import type {
   HandLandmarker,
   HandLandmarkerResult,
   NormalizedLandmark,
+  PoseLandmarker,
+  PoseLandmarkerResult,
 } from "@mediapipe/tasks-vision";
 import {
   averageCalibration,
   calculateCalibration,
   calculateDepthRatio,
   calculatePenetrationCorrection,
+  calculateWholeHandVelocity,
+  fuseForearmVelocity,
   CAMERA_FOCAL_X_NORMALIZED,
-  DEFAULT_CALIBRATION,
   handCenter,
   KNUCKLES,
   mapLandmarkToScene,
@@ -42,11 +47,19 @@ type SessionStats = {
 type Calibration = HandCalibration;
 
 type PunchSample = {
-  point: THREE.Vector3;
+  landmarks: THREE.Vector3[];
   velocity: THREE.Vector3;
-  speed: number;
+  forearmPoint: THREE.Vector3 | null;
   distance: number;
+  depthRatio: number;
   at: number;
+};
+
+type HandAssetRig = {
+  root: THREE.Object3D;
+  joints: Map<string, THREE.Object3D>;
+  restPositions: Map<string, THREE.Vector3>;
+  restQuaternions: Map<string, THREE.Quaternion>;
 };
 
 type ArenaApi = {
@@ -54,8 +67,8 @@ type ArenaApi = {
     result: HandLandmarkerResult,
     time: number,
   ) => void;
+  setPoseResult: (result: PoseLandmarkerResult, time: number) => void;
   calibrate: (calibration: Calibration) => { cameraDistance: number };
-  manualPunch: (x: number, y: number, power?: number) => void;
   enableAudio: () => Promise<void>;
   setAudioEnabled: (enabled: boolean) => void;
   setHitDetection: (enabled: boolean) => void;
@@ -85,6 +98,29 @@ const CONNECTIONS: ReadonlyArray<readonly [number, number]> = [
   [19, 20],
   [0, 17],
 ];
+
+const HAND_CONTACT_ZONES: ReadonlyArray<ReadonlyArray<number>> = [
+  KNUCKLES,
+  [4, 8, 12, 16, 20],
+  [3, 7, 11, 15, 19],
+  [0, 5, 9, 13, 17],
+];
+
+const HAND_SIZE_GAIN = 1.4;
+const HAND_POSITION_GAIN = 1.28 * HAND_SIZE_GAIN;
+const REAL_HAND_MESH_SCALE = 1.62;
+const EXPOSED_FINGER_JOINTS = new Set([3, 4, 7, 8, 11, 12, 15, 16, 19, 20]);
+const POSE_ARM_INDICES = [
+  { shoulder: 11, elbow: 13, wrist: 15 },
+  { shoulder: 12, elbow: 14, wrist: 16 },
+] as const;
+
+const HAND_ASSET_FINGERS = [
+  { name: "index-finger", points: [5, 6, 7, 8] },
+  { name: "middle-finger", points: [9, 10, 11, 12] },
+  { name: "ring-finger", points: [13, 14, 15, 16] },
+  { name: "pinky-finger", points: [17, 18, 19, 20] },
+] as const;
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
@@ -144,21 +180,113 @@ function makeBagMarkTexture() {
   canvas.height = 1024;
   const ctx = canvas.getContext("2d")!;
   ctx.clearRect(0, 0, 1024, 1024);
-  ctx.fillStyle = "rgba(255,255,255,.94)";
-  ctx.textAlign = "center";
-  ctx.font = "900 128px Arial Narrow, Arial";
-  ctx.fillText("KINETIQ", 512, 450);
-  ctx.fillStyle = "rgba(255,255,255,.56)";
-  ctx.font = "600 34px Arial";
-  ctx.letterSpacing = "13px";
-  ctx.fillText("HEAVY / 42 KG", 512, 525);
-  ctx.strokeStyle = "rgba(255,255,255,.32)";
-  ctx.lineWidth = 7;
+  ctx.strokeStyle = "rgba(255,255,255,.38)";
+  ctx.lineWidth = 9;
   ctx.beginPath();
-  ctx.arc(512, 410, 245, 0, Math.PI * 2);
+  ctx.arc(512, 492, 282, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(255,255,255,.94)";
+  ctx.beginPath();
+  ctx.moveTo(394, 635);
+  ctx.bezierCurveTo(310, 611, 269, 541, 284, 452);
+  ctx.bezierCurveTo(300, 351, 383, 285, 489, 279);
+  ctx.bezierCurveTo(603, 271, 704, 330, 728, 430);
+  ctx.bezierCurveTo(754, 540, 687, 626, 591, 654);
+  ctx.lineTo(394, 635);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(334, 477);
+  ctx.bezierCurveTo(247, 469, 210, 520, 231, 581);
+  ctx.bezierCurveTo(254, 646, 323, 660, 387, 621);
+  ctx.lineTo(404, 538);
+  ctx.bezierCurveTo(385, 505, 360, 485, 334, 477);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(255,255,255,.78)";
+  ctx.roundRect(384, 625, 230, 142, 28);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(151,8,18,.5)";
+  ctx.lineWidth = 12;
+  ctx.beginPath();
+  ctx.moveTo(392, 637);
+  ctx.lineTo(608, 637);
   ctx.stroke();
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function makeHandWrapTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d")!;
+  const base = ctx.createLinearGradient(0, 0, 256, 256);
+  base.addColorStop(0, "#f5f1e7");
+  base.addColorStop(0.52, "#ded8cb");
+  base.addColorStop(1, "#f0ece2");
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, 256, 256);
+
+  ctx.lineWidth = 0.75;
+  for (let y = 1; y < 256; y += 3) {
+    ctx.strokeStyle = y % 9 === 1 ? "rgba(90,82,72,.22)" : "rgba(255,255,255,.42)";
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(256, y + 12);
+    ctx.stroke();
+  }
+  for (let x = -256; x < 256; x += 7) {
+    ctx.strokeStyle = "rgba(112,102,90,.12)";
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x + 256, 256);
+    ctx.stroke();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(3.5, 5.5);
+  texture.anisotropy = 8;
+  return texture;
+}
+
+function makeSkinTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d")!;
+  const base = ctx.createRadialGradient(92, 72, 12, 128, 128, 210);
+  base.addColorStop(0, "#d7a080");
+  base.addColorStop(0.56, "#bd8064");
+  base.addColorStop(1, "#9f6854");
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, 256, 256);
+
+  for (let i = 0; i < 900; i += 1) {
+    const x = (i * 73) % 256;
+    const y = (i * 151 + Math.floor(i / 7) * 19) % 256;
+    const shade = 94 + ((i * 31) % 55);
+    ctx.fillStyle = `rgba(${shade}, ${Math.max(45, shade - 35)}, ${Math.max(38, shade - 44)}, 0.055)`;
+    ctx.fillRect(x, y, 1, 1);
+  }
+  ctx.strokeStyle = "rgba(100, 55, 48, 0.09)";
+  ctx.lineWidth = 0.7;
+  for (let y = 18; y < 256; y += 34) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.bezierCurveTo(70, y - 5, 168, y + 7, 256, y - 2);
+    ctx.stroke();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(2.2, 2.2);
+  texture.anisotropy = 8;
   return texture;
 }
 
@@ -626,39 +754,287 @@ function createArena(
   const handGroups = [new THREE.Group(), new THREE.Group()];
   const handJoints: THREE.Mesh[][] = [[], []];
   const handBones: THREE.Mesh[][] = [[], []];
-  const handColors = [0x64ffe0, 0xffc861];
+  const handSurfaces: Array<{
+    palm: THREE.Mesh;
+    heel: THREE.Mesh;
+    thenar: THREE.Mesh;
+    wristband: THREE.Mesh;
+    nails: THREE.Mesh[];
+    wrapLayers: THREE.Mesh[];
+  }> = [];
+  const segmentRadii = [
+    0.04, 0.037, 0.033, 0.028,
+    0.05, 0.043, 0.035, 0.029,
+    0.052,
+    0.044, 0.036, 0.03,
+    0.053,
+    0.042, 0.034, 0.028,
+    0.052,
+    0.039, 0.032, 0.027,
+    0.048,
+  ];
+  const fingertipIndices = new Set([4, 8, 12, 16, 20]);
+  const middleJointIndices = new Set([3, 6, 7, 10, 11, 14, 15, 18, 19]);
+  const wrapTexture = makeHandWrapTexture();
+  wrapTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const skinTexture = makeSkinTexture();
+  skinTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const wrapMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0xf2eee4,
+    map: wrapTexture,
+    bumpMap: wrapTexture,
+    bumpScale: 0.009,
+    roughness: 0.92,
+    metalness: 0,
+    clearcoat: 0.04,
+    sheen: 0.28,
+    sheenColor: new THREE.Color(0xffffff),
+  });
+  const skinMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff,
+    map: skinTexture,
+    bumpMap: skinTexture,
+    bumpScale: 0.0045,
+    emissive: new THREE.Color(0x4a1c12),
+    emissiveIntensity: 0.07,
+    roughness: 0.62,
+    metalness: 0.01,
+    clearcoat: 0.14,
+    clearcoatRoughness: 0.5,
+    sheen: 0.4,
+    sheenColor: new THREE.Color(0xffd0b3),
+  });
+  const nailMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0xf0c5ad,
+    roughness: 0.38,
+    clearcoat: 0.45,
+    clearcoatRoughness: 0.3,
+  });
   handGroups.forEach((group, handIndex) => {
     group.visible = false;
     scene.add(group);
-    const material = new THREE.MeshStandardMaterial({
-      color: handColors[handIndex],
-      emissive: handColors[handIndex],
-      emissiveIntensity: 0.8,
-      transparent: true,
-      opacity: 0.72,
-      roughness: 0.18,
-    });
     for (let i = 0; i < 21; i += 1) {
+      const radius =
+        i === 0
+          ? 0.055 * HAND_SIZE_GAIN
+          : KNUCKLES.includes(i as (typeof KNUCKLES)[number])
+            ? 0.061 * HAND_SIZE_GAIN
+            : fingertipIndices.has(i)
+              ? 0.039 * HAND_SIZE_GAIN
+              : middleJointIndices.has(i)
+                ? 0.043 * HAND_SIZE_GAIN
+                : 0.047 * HAND_SIZE_GAIN;
       const joint = new THREE.Mesh(
-        new THREE.SphereGeometry(
-          KNUCKLES.includes(i as (typeof KNUCKLES)[number]) ? 0.045 : 0.03,
-          10,
-          8,
-        ),
-        material,
+        new THREE.SphereGeometry(radius, 16, 12),
+        EXPOSED_FINGER_JOINTS.has(i) ? skinMaterial : wrapMaterial,
       );
+      joint.castShadow = true;
+      joint.visible = false;
       group.add(joint);
       handJoints[handIndex].push(joint);
     }
     for (let i = 0; i < CONNECTIONS.length; i += 1) {
+      const radius = segmentRadii[i] * HAND_SIZE_GAIN;
+      const [, to] = CONNECTIONS[i];
       const bone = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.014, 0.014, 1, 7),
-        material,
+        new THREE.CylinderGeometry(radius * 0.84, radius, 1, 14),
+        EXPOSED_FINGER_JOINTS.has(to) ? skinMaterial : wrapMaterial,
       );
+      bone.castShadow = true;
+      bone.visible = false;
       group.add(bone);
       handBones[handIndex].push(bone);
     }
+    const palm = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 32, 24),
+      wrapMaterial,
+    );
+    const heel = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 28, 20),
+      wrapMaterial,
+    );
+    const thenar = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 24, 18),
+      wrapMaterial,
+    );
+    const wristband = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.9, 1, 1, 24),
+      wrapMaterial,
+    );
+    const nails = [4, 8, 12, 16, 20].map(() =>
+      new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), nailMaterial),
+    );
+    nails.forEach((nail) => {
+      nail.visible = false;
+    });
+    const wrapLayers = Array.from({ length: 4 }, () =>
+      new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), wrapMaterial),
+    );
+    [palm, heel, thenar, wristband, ...nails, ...wrapLayers].forEach((mesh) => {
+      mesh.castShadow = true;
+      mesh.renderOrder = 2;
+      group.add(mesh);
+    });
+    handSurfaces.push({ palm, heel, thenar, wristband, nails, wrapLayers });
+
   });
+
+  const handAssetRigs: Array<{
+    left: HandAssetRig | null;
+    right: HandAssetRig | null;
+  }> = [
+    { left: null, right: null },
+    { left: null, right: null },
+  ];
+  const handAssetLoader = new GLTFLoader();
+
+  function createHandAssetRig(template: THREE.Object3D, slot: number) {
+    const root = cloneSkeleton(template);
+    const joints = new Map<string, THREE.Object3D>();
+    const restPositions = new Map<string, THREE.Vector3>();
+    const restQuaternions = new Map<string, THREE.Quaternion>();
+    root.visible = false;
+    root.scale.setScalar(REAL_HAND_MESH_SCALE);
+    root.traverse((object) => {
+      if (object.name) {
+        joints.set(object.name, object);
+        restPositions.set(object.name, object.position.clone());
+        restQuaternions.set(object.name, object.quaternion.clone());
+      }
+      if (object instanceof THREE.Mesh) {
+        object.material = skinMaterial;
+        object.castShadow = true;
+        object.frustumCulled = false;
+        object.renderOrder = 1;
+      }
+    });
+    handGroups[slot].add(root);
+    return { root, joints, restPositions, restQuaternions };
+  }
+
+  Promise.all([
+    handAssetLoader.loadAsync("/assets/hands/left.glb"),
+    handAssetLoader.loadAsync("/assets/hands/right.glb"),
+  ])
+    .then(([left, right]) => {
+      if (disposed) return;
+      for (let slot = 0; slot < 2; slot += 1) {
+        handAssetRigs[slot].left = createHandAssetRig(left.scene, slot);
+        handAssetRigs[slot].right = createHandAssetRig(right.scene, slot);
+      }
+    })
+    .catch((error: unknown) => {
+      console.warn("Human hand assets could not be loaded", error);
+    });
+
+  function driveHandAsset(
+    handIndex: number,
+    handedness: "left" | "right",
+    positions: THREE.Vector3[],
+  ) {
+    const slot = handAssetRigs[handIndex];
+    const rig = slot[handedness];
+    if (slot.left) slot.left.root.visible = handedness === "left";
+    if (slot.right) slot.right.root.visible = handedness === "right";
+    if (!rig) return;
+
+    const targets = new Map<string, THREE.Vector3>();
+    const chains: string[][] = [];
+    const target = (name: string, position: THREE.Vector3) => {
+      targets.set(name, position.clone().multiplyScalar(1 / REAL_HAND_MESH_SCALE));
+    };
+
+    target("wrist", positions[0]);
+    const thumbChain = [
+      "thumb-metacarpal",
+      "thumb-phalanx-proximal",
+      "thumb-phalanx-distal",
+      "thumb-tip",
+    ];
+    [1, 2, 3, 4].forEach((landmark, index) => {
+      target(thumbChain[index], positions[landmark]);
+    });
+    chains.push(thumbChain);
+
+    HAND_ASSET_FINGERS.forEach(({ name, points }) => {
+      const chain = [
+        `${name}-metacarpal`,
+        `${name}-phalanx-proximal`,
+        `${name}-phalanx-intermediate`,
+        `${name}-phalanx-distal`,
+        `${name}-tip`,
+      ];
+      target(chain[0], positions[0].clone().lerp(positions[points[0]], 0.46));
+      points.forEach((landmark, index) => {
+        target(chain[index + 1], positions[landmark]);
+      });
+      chains.push(chain);
+    });
+
+    const orient = (name: string, adjacentName: string, reverse = false) => {
+      const joint = rig.joints.get(name);
+      const rest = rig.restPositions.get(name);
+      const restAdjacent = rig.restPositions.get(adjacentName);
+      const restQuaternion = rig.restQuaternions.get(name);
+      const current = targets.get(name);
+      const currentAdjacent = targets.get(adjacentName);
+      if (
+        !joint ||
+        !rest ||
+        !restAdjacent ||
+        !restQuaternion ||
+        !current ||
+        !currentAdjacent
+      ) {
+        return;
+      }
+      const restDirection = reverse
+        ? rest.clone().sub(restAdjacent)
+        : restAdjacent.clone().sub(rest);
+      const currentDirection = reverse
+        ? current.clone().sub(currentAdjacent)
+        : currentAdjacent.clone().sub(current);
+      if (restDirection.lengthSq() < 1e-8 || currentDirection.lengthSq() < 1e-8) {
+        return;
+      }
+      const delta = new THREE.Quaternion().setFromUnitVectors(
+        restDirection.normalize(),
+        currentDirection.normalize(),
+      );
+      joint.position.copy(current);
+      joint.quaternion.copy(delta.multiply(restQuaternion));
+    };
+
+    const wristNext = "middle-finger-metacarpal";
+    orient("wrist", wristNext);
+    chains.forEach((chain) => {
+      chain.forEach((name, index) => {
+        if (index < chain.length - 1) orient(name, chain[index + 1]);
+        else orient(name, chain[index - 1], true);
+      });
+    });
+  }
+
+  const handFrameMatrix = new THREE.Matrix4();
+  function poseHandPart(
+    mesh: THREE.Mesh,
+    center: THREE.Vector3,
+    lateral: THREE.Vector3,
+    longitudinal: THREE.Vector3,
+    scale: THREE.Vector3,
+  ) {
+    const yAxis = longitudinal.clone().normalize();
+    const xAxis = lateral
+      .clone()
+      .addScaledVector(yAxis, -lateral.dot(yAxis));
+    if (xAxis.lengthSq() < 1e-6) xAxis.set(1, 0, 0);
+    xAxis.normalize();
+    const zAxis = xAxis.clone().cross(yAxis).normalize();
+    handFrameMatrix.makeBasis(xAxis, yAxis, zAxis);
+    mesh.position.copy(center);
+    mesh.quaternion.setFromRotationMatrix(handFrameMatrix);
+    mesh.scale.copy(scale);
+  }
 
   function landmarkToWorld(
     landmark: NormalizedLandmark,
@@ -675,10 +1051,82 @@ function createArena(
       return new THREE.Vector3(mapped.x, mapped.y, mapped.z);
     }
     return new THREE.Vector3(
-      (0.5 - landmark.x) * 7.35,
-      (0.55 - landmark.y) * 5.2 + 2.05,
-      landmark.z * 9.2 + 0.85,
+      bagBody.position.x + (0.5 - landmark.x) * 1.4,
+      bagBody.position.y + (0.5 - landmark.y) * 0.9,
+      bagBody.position.z + bagRadius + 0.52 + landmark.z * 1.35,
     );
+  }
+
+  let latestPose: PoseLandmarkerResult | null = null;
+  let latestPoseTime = 0;
+
+  function updatePose(result: PoseLandmarkerResult, time: number) {
+    latestPose = result;
+    latestPoseTime = time;
+  }
+
+  function poseTrackedForearmPoint(
+    handImageCenter: ReturnType<typeof handCenter>,
+    wristWorld: THREE.Vector3,
+    palmLength: number,
+    depthRatio: number,
+    time: number,
+  ) {
+    const pose = latestPose?.landmarks[0];
+    if (!pose || time - latestPoseTime > 180 || !calibratedHandFrame) {
+      return null;
+    }
+
+    const armIndex = POSE_ARM_INDICES.reduce((closest, candidate) => {
+      const closestWrist = pose[closest.wrist];
+      const candidateWrist = pose[candidate.wrist];
+      const closestDistance = Math.hypot(
+        closestWrist.x - handImageCenter.x,
+        closestWrist.y - handImageCenter.y,
+      );
+      const candidateDistance = Math.hypot(
+        candidateWrist.x - handImageCenter.x,
+        candidateWrist.y - handImageCenter.y,
+      );
+      return candidateDistance < closestDistance ? candidate : closest;
+    });
+    const poseWrist = pose[armIndex.wrist];
+    const poseElbow = pose[armIndex.elbow];
+    const armConfidence = Math.min(
+      poseWrist.visibility ?? 0,
+      poseElbow.visibility ?? 0,
+    );
+    if (armConfidence < 0.34) {
+      return null;
+    }
+
+    const frame = calibratedHandFrame;
+    const poseScale = (frame.unitsPerImage / clamp(depthRatio, 0.72, 2.1)) * 1.62;
+    const poseDelta = (from: NormalizedLandmark, to: NormalizedLandmark) =>
+      new THREE.Vector3(
+        (from.x - to.x) * poseScale,
+        ((from.y - to.y) * poseScale) / frame.aspect,
+        (to.z - from.z) * poseScale * 0.42,
+      );
+    const fitLimb = (
+      start: THREE.Vector3,
+      delta: THREE.Vector3,
+      minimum: number,
+      maximum: number,
+    ) => {
+      if (delta.lengthSq() < 1e-6) delta.set(0, -1, 0);
+      const length = delta.length();
+      return start
+        .clone()
+        .add(delta.normalize().multiplyScalar(clamp(length, minimum, maximum)));
+    };
+    const elbowWorld = fitLimb(
+      wristWorld,
+      poseDelta(poseWrist, poseElbow),
+      palmLength * 1.65,
+      palmLength * 3.5,
+    );
+    return wristWorld.clone().lerp(elbowWorld, 0.38);
   }
 
   const previousHands: Array<PunchSample | null> = [null, null];
@@ -771,7 +1219,7 @@ function createArena(
       new CANNON.Vec3(impulse.x, impulse.y * 0.42, impulse.z),
       new CANNON.Vec3(point.x, point.y, point.z),
     );
-    const force = Math.round(clamp(cappedSpeed * 118 + impulseMagnitude * 21, 180, 1480));
+    const force = Math.round(clamp(cappedSpeed * 118 + impulseMagnitude * 21, 180, 1580));
     squash = clamp(cappedSpeed / 8.5, 0.18, 0.82);
     burst(point, impulse.clone().normalize());
     if (audioEnabled && audioReady && listener.context.state === "running") {
@@ -812,14 +1260,40 @@ function createArena(
       const positions = landmarks.map((landmark) =>
         landmarkToWorld(landmark, center, handDepthScales[handIndex]),
       );
+      const motionPositions = positions.map((position) => position.clone());
+      const bagCenter = new THREE.Vector3(
+        bagBody.position.x,
+        bagBody.position.y,
+        bagBody.position.z,
+      );
+      const contactPoints = HAND_CONTACT_ZONES.map((zone) =>
+        zone
+          .reduce(
+            (contactCenter, index) => contactCenter.add(motionPositions[index]),
+            new THREE.Vector3(),
+          )
+          .multiplyScalar(1 / zone.length),
+      );
+      const rawContact = contactPoints.reduce((closest, candidate) => {
+        const closestLocal = closest.clone().sub(bagCenter);
+        const candidateLocal = candidate.clone().sub(bagCenter);
+        const closestScore =
+          Math.hypot(closestLocal.x, closestLocal.z) +
+          Math.max(0, Math.abs(closestLocal.y) - bagHeight * 0.58) * 1.6;
+        const candidateScore =
+          Math.hypot(candidateLocal.x, candidateLocal.z) +
+          Math.max(0, Math.abs(candidateLocal.y) - bagHeight * 0.58) * 1.6;
+        return candidateScore < closestScore ? candidate : closest;
+      });
 
       const rawFist = KNUCKLES.reduce(
         (fistCenter, index) => fistCenter.add(positions[index]),
         new THREE.Vector3(),
       ).multiplyScalar(1 / KNUCKLES.length);
+      const correctedContact = rawContact.clone();
       if (active) {
         const correction = calculatePenetrationCorrection(
-          rawFist,
+          rawContact,
           {
             x: bagBody.position.x,
             y: bagBody.position.y,
@@ -833,65 +1307,254 @@ function createArena(
             position.z += correction;
           });
           rawFist.z += correction;
+          correctedContact.z += correction;
         }
       }
 
-      positions.forEach((position, index) => {
+      const visualPositions = positions.map((position) =>
+        rawFist
+          .clone()
+          .add(position.clone().sub(rawFist).multiplyScalar(HAND_POSITION_GAIN)),
+      );
+      if (active) {
+        const visualContact = HAND_CONTACT_ZONES.flatMap((zone) => zone)
+          .reduce(
+            (frontmost, index) =>
+              visualPositions[index].z < frontmost.z
+                ? visualPositions[index]
+                : frontmost,
+            visualPositions[KNUCKLES[0]],
+          );
+        const visualCorrection = calculatePenetrationCorrection(
+          visualContact,
+          { x: bagBody.position.x, y: bagBody.position.y, z: bagBody.position.z },
+          bagRadius,
+          bagHeight,
+        );
+        if (visualCorrection > 0) {
+          visualPositions.forEach((position) => {
+            position.z += visualCorrection;
+          });
+        }
+      }
+      const handednessLabel =
+        result.handedness?.[handIndex]?.[0]?.categoryName?.toLowerCase();
+      const handedness: "left" | "right" =
+        handednessLabel === "right" ? "right" : "left";
+      driveHandAsset(handIndex, handedness, visualPositions);
+      const surface = handSurfaces[handIndex];
+      const wrist = visualPositions[0];
+      const visualFist = KNUCKLES.reduce(
+        (fistCenter, index) => fistCenter.add(visualPositions[index]),
+        new THREE.Vector3(),
+      ).multiplyScalar(1 / KNUCKLES.length);
+      const palmVector = visualFist.clone().sub(wrist);
+      const palmLength = clamp(
+        palmVector.length(),
+        0.12 * HAND_SIZE_GAIN,
+        0.36 * HAND_SIZE_GAIN,
+      );
+      const palmDirection =
+        palmVector.lengthSq() > 1e-6
+          ? palmVector.clone().normalize()
+          : new THREE.Vector3(0, 1, 0);
+      const lateralVector = visualPositions[5].clone().sub(visualPositions[17]);
+      const handWidth = clamp(
+        lateralVector.length(),
+        0.105 * HAND_SIZE_GAIN,
+        0.36 * HAND_SIZE_GAIN,
+      );
+      const lateralDirection =
+        lateralVector.lengthSq() > 1e-6
+          ? lateralVector.clone().normalize()
+          : new THREE.Vector3(1, 0, 0);
+      const palmCenter = wrist
+        .clone()
+        .lerp(visualFist, 0.59)
+        .addScaledVector(palmDirection, 0.012 * HAND_SIZE_GAIN);
+      poseHandPart(
+        surface.palm,
+        palmCenter,
+        lateralDirection,
+        palmDirection,
+        new THREE.Vector3(
+          handWidth * 0.45 + 0.012 * HAND_SIZE_GAIN,
+          palmLength * 0.35 + 0.012 * HAND_SIZE_GAIN,
+          handWidth * 0.105 + 0.007 * HAND_SIZE_GAIN,
+        ),
+      );
+      poseHandPart(
+        surface.heel,
+        wrist.clone().lerp(visualFist, 0.29),
+        lateralDirection,
+        palmDirection,
+        new THREE.Vector3(
+          handWidth * 0.38 + 0.01 * HAND_SIZE_GAIN,
+          palmLength * 0.19 + 0.01 * HAND_SIZE_GAIN,
+          handWidth * 0.09 + 0.006 * HAND_SIZE_GAIN,
+        ),
+      );
+      const thenarCenter = wrist
+        .clone()
+        .lerp(visualPositions[5], 0.55)
+        .lerp(visualPositions[2], 0.24);
+      poseHandPart(
+        surface.thenar,
+        thenarCenter,
+        lateralDirection,
+        palmDirection,
+        new THREE.Vector3(
+          handWidth * 0.2 + 0.008 * HAND_SIZE_GAIN,
+          palmLength * 0.18 + 0.008 * HAND_SIZE_GAIN,
+          handWidth * 0.085 + 0.005 * HAND_SIZE_GAIN,
+        ),
+      );
+
+      surface.wrapLayers.forEach((layer, layerIndex) => {
+        const progress = 0.34 + layerIndex * 0.125;
+        const layerCenter = wrist
+          .clone()
+          .lerp(visualFist, progress)
+          .addScaledVector(palmDirection, (layerIndex - 1.5) * 0.0015);
+        poseHandPart(
+          layer,
+          layerCenter,
+          lateralDirection,
+          palmDirection,
+          new THREE.Vector3(
+            handWidth * (0.43 + layerIndex * 0.012),
+            palmLength * 0.052,
+            handWidth * 0.11 + 0.006 * HAND_SIZE_GAIN,
+          ),
+        );
+      });
+
+      const bandEnd = wrist
+        .clone()
+        .addScaledVector(palmDirection, 0.026 * HAND_SIZE_GAIN);
+      const bandStart = wrist
+        .clone()
+        .addScaledVector(palmDirection, -palmLength * 0.28);
+      const bandVector = bandEnd.clone().sub(bandStart);
+      poseHandPart(
+        surface.wristband,
+        bandStart.clone().lerp(bandEnd, 0.5),
+        lateralDirection,
+        bandVector,
+        new THREE.Vector3(
+          handWidth * 0.34 + 0.012 * HAND_SIZE_GAIN,
+          bandVector.length(),
+          handWidth * 0.16 + 0.008 * HAND_SIZE_GAIN,
+        ),
+      );
+
+      [4, 8, 12, 16, 20].forEach((tipIndex, nailIndex) => {
+        const previousIndex = tipIndex - 1;
+        const fingerDirection = visualPositions[tipIndex]
+          .clone()
+          .sub(visualPositions[previousIndex]);
+        if (fingerDirection.lengthSq() < 1e-6) fingerDirection.copy(palmDirection);
+        const nailNormal = lateralDirection.clone().cross(fingerDirection);
+        if (nailNormal.lengthSq() < 1e-6) nailNormal.set(0, 0, 1);
+        nailNormal.normalize();
+        const nailCenter = visualPositions[tipIndex]
+          .clone()
+          .addScaledVector(
+            fingerDirection.clone().normalize(),
+            -0.012 * HAND_SIZE_GAIN,
+          )
+          .addScaledVector(nailNormal, 0.012 * HAND_SIZE_GAIN);
+        const nailWidth = (tipIndex === 4 ? 0.023 : 0.02) * HAND_SIZE_GAIN;
+        poseHandPart(
+          surface.nails[nailIndex],
+          nailCenter,
+          lateralDirection,
+          fingerDirection,
+          new THREE.Vector3(
+            nailWidth,
+            0.028 * HAND_SIZE_GAIN,
+            0.007 * HAND_SIZE_GAIN,
+          ),
+        );
+      });
+
+      visualPositions.forEach((position, index) => {
         handJoints[handIndex][index].position.copy(position);
       });
       CONNECTIONS.forEach(([from, to], index) => {
         setCylinderBetween(
           handBones[handIndex][index],
-          positions[from],
-          positions[to],
+          visualPositions[from],
+          visualPositions[to],
         );
       });
 
+      const forearmPoint = poseTrackedForearmPoint(
+        center,
+        wrist,
+        palmLength,
+        handDepthScales[handIndex],
+        time,
+      );
+
       const previous = previousHands[handIndex];
-      const fist = previous
-        ? previous.point.clone().lerp(rawFist, 0.44)
-        : rawFist;
       const dt = previous ? clamp((time - previous.at) / 1000, 1 / 120, 0.12) : 1 / 60;
-      const rawVelocity = previous
-        ? fist.clone().sub(previous.point).divideScalar(dt)
-        : new THREE.Vector3();
+      const wholeHandVelocity = previous
+        ? calculateWholeHandVelocity(
+            motionPositions,
+            previous.landmarks,
+            dt,
+          )
+        : { x: 0, y: 0, z: 0 };
+      const fusedVelocity = fuseForearmVelocity(
+        wholeHandVelocity,
+        forearmPoint,
+        previous?.forearmPoint ?? null,
+        dt,
+      );
+      const rawVelocity = new THREE.Vector3(
+        fusedVelocity.x,
+        fusedVelocity.y,
+        fusedVelocity.z,
+      );
       const velocity = previous
-        ? previous.velocity.clone().lerp(rawVelocity, 0.34)
+        ? previous.velocity.clone().lerp(rawVelocity, 0.42)
         : rawVelocity;
       const speed = velocity.length();
-      const bagCenter = new THREE.Vector3(
-        bagBody.position.x,
-        bagBody.position.y,
-        bagBody.position.z,
-      );
-      const localToBag = fist.clone().sub(bagCenter);
+      const depthRate = previous
+        ? (handDepthScales[handIndex] - previous.depthRatio) / dt
+        : 0;
+      const localToBag = rawContact.clone().sub(bagCenter);
       const radialDistance = Math.hypot(localToBag.x, localToBag.z);
       previousHands[handIndex] = {
-        point: fist.clone(),
+        landmarks: motionPositions.map((position) => position.clone()),
         velocity: velocity.clone(),
-        speed,
+        forearmPoint: forearmPoint?.clone() ?? null,
         distance: radialDistance,
+        depthRatio: handDepthScales[handIndex],
         at: time,
       };
 
       if (!active || !previous || time - lastHits[handIndex] < 360) continue;
       const verticalInside = Math.abs(localToBag.y) < bagHeight * 0.58;
-      const fastEnough = speed > 1.05;
+      const fastEnough = speed > 0.98;
       const nearSurface = radialDistance < bagRadius + 0.12;
       const crossedSurface = previous.distance >= bagRadius + 0.1;
       const closingSpeed = velocity.dot(
-        bagCenter.clone().sub(fist).normalize(),
+        bagCenter.clone().sub(rawContact).normalize(),
       );
-      const approaching = closingSpeed > 0.72;
+      const approaching = closingSpeed > 0.6;
+      const movingTowardCamera = depthRate > 0.34 && -velocity.z > 0.46;
       if (
         verticalInside &&
         fastEnough &&
         nearSurface &&
         crossedSurface &&
-        approaching
+        approaching &&
+        movingTowardCamera
       ) {
         lastHits[handIndex] = time;
-        applyPunch(fist, velocity, speed);
+        applyPunch(correctedContact, velocity, speed);
       }
     }
   }
@@ -997,6 +1660,7 @@ function createArena(
 
   return {
     setTrackingResult: updateHands,
+    setPoseResult: updatePose,
     calibrate(calibration) {
       const cameraDistance = clamp(calibration.cameraDistance, 0.42, 1.35);
       const unitsPerImage = clamp(
@@ -1046,18 +1710,6 @@ function createArena(
       bagBody.applyImpulse(new CANNON.Vec3(0.7, 0, 0.18));
       return { cameraDistance };
     },
-    manualPunch(x, y, power = 1) {
-      active = true;
-      const point = new THREE.Vector3(
-        bagBody.position.x + clamp(x, -1, 1) * bagRadius,
-        bagBody.position.y + clamp(y, -1, 1) * bagHeight * 0.35,
-        bagBody.position.z + bagRadius,
-      );
-      const velocity = new THREE.Vector3(-x * 0.38, -y * 0.12, -1)
-        .normalize()
-        .multiplyScalar(clamp(power, 1.8, 8.2));
-      applyPunch(point, velocity, velocity.length());
-    },
     async enableAudio() {
       if (listener.context.state !== "running") await listener.context.resume();
       if (!audioReady) buildImpactBuffer();
@@ -1088,6 +1740,8 @@ function createArena(
       });
       floorMap.dispose();
       floorNormal.dispose();
+      wrapTexture.dispose();
+      skinTexture.dispose();
     },
   };
 }
@@ -1098,6 +1752,9 @@ export default function PunchLab() {
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const arenaRef = useRef<ArenaApi | null>(null);
   const landmarkerRef = useRef<HandLandmarker | null>(null);
+  const poseLandmarkerRef = useRef<PoseLandmarker | null>(null);
+  const latestPoseResultRef = useRef<PoseLandmarkerResult | null>(null);
+  const previousPoseTimeRef = useRef(-1);
   const streamRef = useRef<MediaStream | null>(null);
   const trackingFrameRef = useRef(0);
   const previousVideoTimeRef = useRef(-1);
@@ -1119,13 +1776,12 @@ export default function PunchLab() {
     best: 0,
   });
   const comboTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pointerStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
 
   const phaseLabel = useMemo(() => {
     if (phase === "active") return "Tracking live";
     if (phase === "calibrating") return "Calibration active";
-    if (phase === "loading") return "Loading hand model";
-    if (phase === "error") return "Manual mode ready";
+    if (phase === "loading") return "Loading hand + arm model";
+    if (phase === "error") return "Camera required";
     return "Awaiting camera";
   }, [phase]);
 
@@ -1207,7 +1863,8 @@ export default function PunchLab() {
       if (cancelled) return;
       const video = videoRef.current;
       const landmarker = landmarkerRef.current;
-      if (!video || !landmarker || streamRef.current === null) return;
+      const poseLandmarker = poseLandmarkerRef.current;
+      if (!video || !landmarker || !poseLandmarker || streamRef.current === null) return;
       const now = performance.now();
       if (
         video.readyState >= 2 &&
@@ -1215,6 +1872,12 @@ export default function PunchLab() {
       ) {
         previousVideoTimeRef.current = video.currentTime;
         const result = landmarker.detectForVideo(video, now);
+        if (now - previousPoseTimeRef.current >= 52) {
+          previousPoseTimeRef.current = now;
+          const poseResult = poseLandmarker.detectForVideo(video, now);
+          latestPoseResultRef.current = poseResult;
+          arenaRef.current?.setPoseResult(poseResult, now);
+        }
         setHandsDetected(result.landmarks.length);
         drawOverlay(result);
         arenaRef.current?.setTrackingResult(result, now);
@@ -1277,7 +1940,7 @@ export default function PunchLab() {
 
   const startCamera = useCallback(async () => {
     setPhase("loading");
-    setStatusText("Starting camera and hand model…");
+    setStatusText("Starting hand tracking…");
     setCameraExpanded(true);
     try {
       await arenaRef.current?.enableAudio();
@@ -1296,7 +1959,7 @@ export default function PunchLab() {
       video.srcObject = stream;
       await video.play();
 
-      const { FilesetResolver, HandLandmarker } = await import(
+      const { FilesetResolver, HandLandmarker, PoseLandmarker } = await import(
         "@mediapipe/tasks-vision"
       );
       const vision = await FilesetResolver.forVisionTasks("/mediapipe/wasm");
@@ -1325,6 +1988,35 @@ export default function PunchLab() {
           minTrackingConfidence: 0.52,
         });
       }
+      try {
+        poseLandmarkerRef.current = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "/mediapipe/models/pose_landmarker_lite.task",
+            delegate: "GPU",
+          },
+          runningMode: "VIDEO",
+          numPoses: 1,
+          minPoseDetectionConfidence: 0.52,
+          minPosePresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+          outputSegmentationMasks: false,
+        });
+      } catch {
+        poseLandmarkerRef.current = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "/mediapipe/models/pose_landmarker_lite.task",
+            delegate: "CPU",
+          },
+          runningMode: "VIDEO",
+          numPoses: 1,
+          minPoseDetectionConfidence: 0.52,
+          minPosePresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+          outputSegmentationMasks: false,
+        });
+      }
+      previousPoseTimeRef.current = -1;
+      latestPoseResultRef.current = null;
       setCameraLive(true);
       arenaRef.current?.setHitDetection(false);
       calibrationSamplesRef.current = [];
@@ -1333,17 +2025,18 @@ export default function PunchLab() {
       setStatusText("Bring both hands into frame");
     } catch (error) {
       console.error(error);
-      setPhase("active");
-      setStatusText("Camera unavailable · manual sparring enabled");
-      arenaRef.current?.calibrate(DEFAULT_CALIBRATION);
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      landmarkerRef.current?.close();
+      landmarkerRef.current = null;
+      poseLandmarkerRef.current?.close();
+      poseLandmarkerRef.current = null;
+      latestPoseResultRef.current = null;
+      setCameraLive(false);
+      arenaRef.current?.setHitDetection(false);
+      setPhase("error");
+      setStatusText("Camera unavailable · hand tracking required");
     }
-  }, []);
-
-  const useManualMode = useCallback(async () => {
-    await arenaRef.current?.enableAudio();
-    arenaRef.current?.calibrate(DEFAULT_CALIBRATION);
-    setPhase("active");
-    setStatusText("Manual sparring · swipe or tap the bag");
   }, []);
 
   const stopCamera = useCallback(() => {
@@ -1352,6 +2045,10 @@ export default function PunchLab() {
     streamRef.current = null;
     landmarkerRef.current?.close();
     landmarkerRef.current = null;
+    poseLandmarkerRef.current?.close();
+    poseLandmarkerRef.current = null;
+    latestPoseResultRef.current = null;
+    previousPoseTimeRef.current = -1;
     setCameraLive(false);
     setHandsDetected(0);
     setPhase("idle");
@@ -1376,41 +2073,6 @@ export default function PunchLab() {
 
   useEffect(() => () => stopCamera(), [stopCamera]);
 
-  const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    pointerStartRef.current = {
-      x: event.clientX,
-      y: event.clientY,
-      time: performance.now(),
-    };
-  };
-
-  const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const start = pointerStartRef.current;
-    pointerStartRef.current = null;
-    if (!start || phase === "loading" || phase === "calibrating") return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const dx = event.clientX - start.x;
-    const dy = event.clientY - start.y;
-    const duration = Math.max(50, performance.now() - start.time);
-    const gestureSpeed = Math.hypot(dx, dy) / duration;
-    const x = ((event.clientX - rect.left) / rect.width - 0.5) * 2;
-    const y = -(((event.clientY - rect.top) / rect.height - 0.5) * 2);
-    arenaRef.current?.manualPunch(x, y, clamp(2.2 + gestureSpeed * 7, 2.2, 7.8));
-    if (phase === "idle" || phase === "error") setPhase("active");
-  };
-
-  useEffect(() => {
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.code !== "Space" && event.key.toLowerCase() !== "j" && event.key.toLowerCase() !== "k") return;
-      event.preventDefault();
-      const side = event.key.toLowerCase() === "j" ? -0.5 : 0.5;
-      arenaRef.current?.manualPunch(side, 0.08, 5.4);
-      if (phase === "idle") setPhase("active");
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [phase]);
-
   const toggleAudio = useCallback(async () => {
     const next = !audioOn;
     setAudioOn(next);
@@ -1423,27 +2085,21 @@ export default function PunchLab() {
       <canvas
         ref={canvasRef}
         className="arena-canvas"
-        aria-label="Interactive 3D boxing gym and physics punching bag"
-        onPointerDown={handlePointerDown}
-        onPointerUp={handlePointerUp}
+        aria-label="3D boxing gym and hand-tracked physics punching bag"
       />
       <div className="vignette" />
       <div className="grain" />
 
       <header className="topbar">
-        <div className="brand-lockup">
-          <span className="brand-mark" aria-hidden="true">
-            K
+        <div className="glove-lockup" aria-label="Boxing glove">
+          <span className="glove-logo" aria-hidden="true">
+            <span className="glove-logo-shape" />
+            <span className="glove-logo-cuff" />
           </span>
-          <span className="brand-word">KINETIQ</span>
-          <span className="brand-divider" />
-          <span className="brand-sub">PUNCH LAB</span>
         </div>
         <div className="system-strip">
           <span className="system-dot" />
           <span>{phaseLabel}</span>
-          <span className="system-rule" />
-          <span>THREE.JS / CANNON-ES</span>
           <button
             className="icon-button"
             type="button"
@@ -1457,8 +2113,30 @@ export default function PunchLab() {
       </header>
 
       <aside className="stats-rail" aria-label="Punch session statistics">
+        <div className="challenge-card">
+          <span className="proof-code" aria-label="Screenshot verification number">
+            1501
+          </span>
+          <span className="challenge-kicker">FIRST 20 TO SCORE</span>
+          <strong className="challenge-score">1501 N</strong>
+          <div
+            className="challenge-prize"
+            aria-label="One year of Sparcd free at launch"
+          >
+            <strong aria-hidden="true">
+              <span>1 YEAR OF</span>
+              <span>SPARCD FREE</span>
+            </strong>
+            <span className="challenge-launch" aria-hidden="true">
+              AT LAUNCH
+            </span>
+          </div>
+          <small className="challenge-details">
+            TAG ME + POST YOUR SCORE SCREENSHOT
+          </small>
+        </div>
         <div className="stat-block stat-primary">
-          <span className="stat-label">IMPACT</span>
+          <span className="stat-label">PUNCH SCORE</span>
           <strong>{stats.force || "—"}</strong>
           <span className="stat-unit">NEWTONS</span>
         </div>
@@ -1483,7 +2161,7 @@ export default function PunchLab() {
         </div>
       </aside>
 
-      {(phase === "idle" || phase === "loading") && (
+      {(phase === "idle" || phase === "loading" || phase === "error") && (
         <section className="intro-panel" aria-labelledby="intro-title">
           <p className="eyebrow">CAMERA-TRACKED BOXING SIMULATION</p>
           <h1 id="intro-title">
@@ -1492,9 +2170,9 @@ export default function PunchLab() {
             <em>REAL IMPACT.</em>
           </h1>
           <p className="intro-copy">
-            Turn on your camera, frame both hands and hold a thumbs-up. We’ll map
-            your reach to a 42 kg physics bag — then every open-hand or closed-fist
-            strike moves it for real.
+            Turn on your camera and keep both hands in frame. Hold two thumbs up
+            to map your reach to the 42 kg physics bag — then
+            every open-hand or closed-fist strike moves it for real.
           </p>
           <div className="intro-actions">
             <button
@@ -1507,9 +2185,6 @@ export default function PunchLab() {
               <span>{phase === "loading" ? "LOADING VISION…" : "START CAMERA"}</span>
               <b aria-hidden="true">↗</b>
             </button>
-            <button type="button" className="text-button" onClick={useManualMode}>
-              PRACTICE WITHOUT CAMERA
-            </button>
           </div>
           <div className="privacy-note">
             <span className="privacy-icon">◉</span>
@@ -1521,7 +2196,7 @@ export default function PunchLab() {
         </section>
       )}
 
-      {(phase === "calibrating" || phase === "error") && (
+      {phase === "calibrating" && (
         <section className="calibration-card" data-testid="calibration-card">
           <div className="card-index">01 / CALIBRATE</div>
           <div className="gesture-icon" aria-hidden="true">
@@ -1562,7 +2237,7 @@ export default function PunchLab() {
           <div>
             <span className={`live-dot ${cameraLive ? "live" : ""}`} />
             <strong>HAND TRACKING</strong>
-            <small>MEDIAPIPE / LIVE</small>
+            <small>21 LANDMARKS / HAND</small>
           </div>
           <button
             type="button"
@@ -1574,7 +2249,10 @@ export default function PunchLab() {
         </div>
         <div className="camera-viewport">
           <video ref={videoRef} muted playsInline aria-label="Camera preview" />
-          <canvas ref={overlayRef} aria-label="Tracked hand landmark overlay" />
+          <canvas
+            ref={overlayRef}
+            aria-label="Tracked hand landmark overlay"
+          />
           {!cameraLive && (
             <div className="camera-placeholder">
               <span>CAMERA</span>
@@ -1600,11 +2278,6 @@ export default function PunchLab() {
               </button>
             </div>
           )}
-          {!cameraLive && phase === "active" && (
-            <button type="button" onClick={startCamera}>
-              CAMERA
-            </button>
-          )}
         </div>
       </section>
 
@@ -1613,11 +2286,6 @@ export default function PunchLab() {
           <span>42 KG RIGID BODY</span>
           <span>6-DOF SWING</span>
           <span>SPATIAL IMPACT AUDIO</span>
-        </div>
-        <div className="manual-hint">
-          <kbd>J</kbd>
-          <kbd>K</kbd>
-          <span>or swipe to test the bag</span>
         </div>
       </footer>
     </main>
