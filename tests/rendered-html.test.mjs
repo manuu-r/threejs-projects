@@ -36,8 +36,8 @@ test("server-renders the finished punch challenge", async () => {
   assert.match(html, /REAL IMPACT\./);
   assert.match(html, /START CAMERA/);
   assert.doesNotMatch(html, /PRACTICE WITHOUT CAMERA|swipe to test|manual sparring/i);
-  assert.match(html, /HAND TRACKING/);
-  assert.match(html, /21 LANDMARKS \/ HAND/);
+  assert.match(html, /HAND \+ MASK TRACKING/);
+  assert.match(html, /3D FACE POSE \+ BLINK \+ JAW \/ LIVE/);
   assert.doesNotMatch(html, /FOREARM|ELBOW|SHOULDER/i);
   assert.match(html, /FIRST 20 TO SCORE/);
   assert.match(html, /1501 N/);
@@ -59,6 +59,7 @@ test("ships the local tracking model and visual assets", async () => {
   await Promise.all([
     access(new URL("public/mediapipe/models/hand_landmarker.task", projectRoot)),
     access(new URL("public/mediapipe/models/pose_landmarker_lite.task", projectRoot)),
+    access(new URL("public/mediapipe/models/face_landmarker.task", projectRoot)),
     access(new URL("public/assets/machine_shop_02_1k.hdr", projectRoot)),
     access(new URL("public/assets/rubber_tiles_diff_1k.jpg", projectRoot)),
     access(new URL("public/assets/hands/left.glb", projectRoot)),
@@ -78,7 +79,23 @@ test("keeps punching camera-only", async () => {
     /manualPunch|onPointerDown|onPointerUp|addEventListener\(["']keydown|DEFAULT_CALIBRATION/,
   );
   assert.match(component, /const HAND_SIZE_GAIN = 1\.4/);
+  assert.match(component, /Left and right hands showing thumbs up/);
+  assert.match(component, /gesture-hand-left/);
   assert.match(component, /PoseLandmarker\.createFromOptions/);
+  assert.match(component, /FaceLandmarker\.createFromOptions/);
+  assert.match(component, /drawDeadpoolMask/);
+  assert.match(component, /createFaceMaskRenderer/);
+  assert.match(component, /outputFaceBlendshapes: true/);
+  assert.match(component, /outputFacialTransformationMatrixes: true/);
+  assert.match(component, /leftEyeOpenBaseline/);
+  assert.match(component, /landmarkDistance\(386, 374\)/);
+  assert.match(component, /faceLeftBlink/);
+  assert.match(component, /className="face-mask-layer"/);
+  assert.match(component, /\/audio\/x-gon-give-it-to-u\.mp3/);
+  assert.match(component, /const BACKGROUND_MUSIC_VOLUME = 0\.08/);
+  assert.match(component, /Mute music and impacts/);
+  assert.match(component, /startFallbackMusic/);
+  assert.match(component, /musicBus\.gain\.linearRampToValueAtTime\(0\.18/);
   assert.match(component, /setPoseResult: updatePose/);
   assert.doesNotMatch(component, /upperArm/);
   assert.doesNotMatch(component, /armGroups|armSurfaces/);

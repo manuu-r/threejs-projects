@@ -613,7 +613,11 @@ button {
   filter: saturate(0.72) contrast(1.15) brightness(0.76);
 }
 
-.camera-viewport canvas {
+.camera-viewport .face-mask-layer {
+  z-index: 1;
+}
+
+.camera-viewport .hand-landmark-layer {
   z-index: 2;
 }
 
@@ -733,12 +737,25 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 1px;
+  gap: 8px;
   margin: 24px 0 14px;
   color: var(--cream);
   font-size: 43px;
   line-height: 1;
   filter: grayscale(1) contrast(1.8);
+}
+
+.gesture-hand {
+  display: inline-block;
+  transform-origin: 50% 85%;
+}
+
+.gesture-hand-left {
+  transform: rotate(8deg);
+}
+
+.gesture-hand-right {
+  transform: scaleX(-1) rotate(-8deg);
 }
 
 .calibration-card h2 {
