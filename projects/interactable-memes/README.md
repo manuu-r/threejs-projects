@@ -7,7 +7,5 @@ remix between three original developer moods.
 
 From the repository root:
 
-```bash
-npm install
-npm run dev:memes
-```
+Run `npm run dev` from the repository root and open
+`http://localhost:3000/interactable-memes`.

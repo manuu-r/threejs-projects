@@ -7,10 +7,8 @@ MediaPipe Hand Landmarker.
 
 Requires Node.js `>=22.13.0`.
 
-```bash
-npm install
-npm run dev
-```
+From the repository root, run `npm run dev` and open
+`http://localhost:3000/punch-power`.
 
 Open `http://localhost:3000`, choose **Start camera**, keep both hands visible,
 then hold two thumbs up. Calibration maps the hands'

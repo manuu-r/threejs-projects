@@ -10,7 +10,7 @@ async function render() {
   const { default: worker } = await import(workerUrl.href);
 
   return worker.fetch(
-    new Request("https://punch-lab.test/", {
+    new Request("https://punch-lab.test/punch-power", {
       headers: { accept: "text/html", host: "punch-lab.test" },
     }),
     {
@@ -31,7 +31,7 @@ test("server-renders the finished punch challenge", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>Punch Challenge<\/title>/i);
+  assert.match(html, /<title>Punch Challenge · Three\.js Fun<\/title>/i);
   assert.match(html, /YOUR HANDS\./);
   assert.match(html, /REAL IMPACT\./);
   assert.match(html, /START CAMERA/);
@@ -79,8 +79,8 @@ test("ships the local tracking model and visual assets", async () => {
 
 test("keeps punching camera-only", async () => {
   const [component, styles] = await Promise.all([
-    readFile(new URL("app/PunchLab.tsx", projectRoot), "utf8"),
-    readFile(new URL("app/globals.css", projectRoot), "utf8"),
+    readFile(new URL("projects/punch-power/PunchLab.tsx", projectRoot), "utf8"),
+    readFile(new URL("projects/punch-power/styles.css", projectRoot), "utf8"),
   ]);
 
   assert.doesNotMatch(

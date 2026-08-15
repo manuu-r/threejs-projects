@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
+import Script from "next/script";
 import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -11,27 +12,14 @@ export async function generateMetadata(): Promise<Metadata> {
   const protocol =
     requestHeaders.get("x-forwarded-proto") ??
     (host.startsWith("localhost") ? "http" : "https");
-  const origin = `${protocol}://${host}`;
-  const description =
-    "Step into a realistic browser boxing gym and strike a physics-driven heavy bag using real-time MediaPipe hand tracking.";
 
   return {
-    metadataBase: new URL(origin),
+    metadataBase: new URL(`${protocol}://${host}`),
     title: {
-      default: "Punch Challenge",
-      template: "%s · Punch Challenge",
+      default: "Three.js Fun",
+      template: "%s · Three.js Fun",
     },
-    description,
-    openGraph: {
-      title: "Punch Challenge",
-      description,
-      type: "website",
-    },
-    twitter: {
-      card: "summary",
-      title: "Punch Challenge",
-      description,
-    },
+    description: "Small, tactile Three.js experiments for the browser.",
   };
 }
 
@@ -39,22 +27,15 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
-  themeColor: "#080a0b",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
       <head>
-        <script
-          async
-          src="https://www.googletagmanager.com/gtag/js?id=G-F5WCNFZYZW"
-        />
-        <script
+        <Script async src="https://www.googletagmanager.com/gtag/js?id=G-F5WCNFZYZW" />
+        <Script
+          id="google-analytics"
           dangerouslySetInnerHTML={{
             __html: `
               window.dataLayer = window.dataLayer || [];

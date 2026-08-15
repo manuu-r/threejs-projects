@@ -7,7 +7,7 @@ async function render() {
   const { default: worker } = await import(workerUrl.href);
 
   return worker.fetch(
-    new Request("http://localhost/", {
+    new Request("http://localhost/interactable-memes", {
       headers: { accept: "text/html" },
     }),
     {
@@ -28,7 +28,7 @@ test("server-renders the interactable memes experience", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>Interactable Memes — Memes You Can Touch<\/title>/i);
+  assert.match(html, /<title>Interactable Memes — Memes You Can Touch · Three\.js Fun<\/title>/i);
   assert.match(html, /MEMES YOU/);
   assert.match(html, /CAN TOUCH\./);
   assert.match(html, /REMIX MEME/);
@@ -40,6 +40,6 @@ test("ships absolute social preview metadata", async () => {
   const response = await render();
   const html = await response.text();
 
-  assert.match(html, /property="og:image" content="http:\/\/localhost:3000\/og\.png"/i);
+  assert.match(html, /property="og:image" content="http:\/\/localhost:3000\/interactable-memes\/og\.png"/i);
   assert.match(html, /name="twitter:card" content="summary_large_image"/i);
 });

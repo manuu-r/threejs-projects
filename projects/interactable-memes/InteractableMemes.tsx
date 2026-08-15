@@ -1,6 +1,6 @@
 import { MemeStage } from "./MemeStage";
 
-export default function Home() {
+export default function InteractableMemes() {
   return (
     <main>
       <header className="topbar">

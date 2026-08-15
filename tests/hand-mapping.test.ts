@@ -11,7 +11,7 @@ import {
   wholeHandMotionCenter,
   type CalibratedHandFrame,
   type HandPoint,
-} from "../app/handMapping.ts";
+} from "../projects/punch-power/handMapping.ts";
 
 function makeHand(centerX: number): HandPoint[] {
   const hand = Array.from({ length: 21 }, () => ({

@@ -3371,7 +3371,6 @@ export default function PunchLab() {
             <script
               async
               src="https://platform.x.com/widgets.js"
-              charSet="utf-8"
             />
           </div>
         </div>
