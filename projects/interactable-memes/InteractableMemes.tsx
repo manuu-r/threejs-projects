@@ -91,7 +91,7 @@ export default function InteractableMemes() {
       </header>
 
       <section className="hero" id="top">
-        <Image className="hero-art" src="/interactable-memes/og-v7.png" alt="Interactable Memes ensemble with a serious bearded man surrounded by four directional arrows in the polished low-poly studio art direction" fill priority sizes="100vw" />
+        <Image className="hero-art" src="/interactable-memes/og-v8.png" alt="Interactable Memes ensemble with a compact four-direction nod character and Godzilla staring awkwardly at a gorilla in the polished low-poly studio art direction" fill priority sizes="100vw" />
         <div className="hero-shade" aria-hidden="true" />
         <div className="hero-noise" aria-hidden="true" />
         <div className="hero-copy">
@@ -159,7 +159,7 @@ export default function InteractableMemes() {
           <div className="room-copy">
             <p className="room-index">03 / AWKWARD STAREDOWN</p>
             <h2>Try your best.<br /><em>Avoid eye contact.</em></h2>
-            <p>No glowing core and no invented reactor. Just the actual gorilla and T‑Rex meshes locked in the deeply uncomfortable eye contact the joke deserves.</p>
+            <p>No glowing core and no invented reactor. Just the gorilla facing an original charcoal Godzilla build with atomic dorsal plates and deeply uncomfortable eye contact.</p>
           </div>
           <button className="reactor-trigger" type="button" onClick={() => setReactorLevel((level) => (level + 1) % levels.length)}>MAKE THE STARE WEIRDER <span>＋</span></button>
         </div>
@@ -171,7 +171,7 @@ export default function InteractableMemes() {
               <strong>GUYS I'M GONNA TRY MY BEST</strong>
               <strong>BUT IT'S A F*CKING RADIOACTIVE DINOSAUR</strong>
             </div>
-            <MemeDiorama variant="reactor" accent="#b7ff2f" motion={reactorLevel} ariaLabel={`3D gorilla and dinosaur stare-down at ${levels[reactorLevel]} level. Drag to orbit and tap to intensify the eye contact.`} onAction={() => setReactorLevel((level) => (level + 1) % levels.length)} />
+            <MemeDiorama variant="reactor" accent="#b7ff2f" motion={reactorLevel} ariaLabel={`3D gorilla and Godzilla stare-down at ${levels[reactorLevel]} level. Drag to orbit and tap to intensify the eye contact.`} onAction={() => setReactorLevel((level) => (level + 1) % levels.length)} />
             <p className="machine-tip">STARE STATUS / {levels[reactorLevel]} · TAP TO MAKE IT WORSE</p>
           </div>
         </div>

@@ -819,57 +819,87 @@ def make_gorilla(root: bpy.types.Object) -> bpy.types.Object:
     return gorilla
 
 
-def make_trex(root: bpy.types.Object) -> bpy.types.Object:
-    trex, imported = import_glb_group(
-        LICENSED_MODEL_DIR / "trex.glb",
-        "Trex",
-        root,
-        target_size=4.3,
-        location=(1.65, 0.2, 0.24),
-        fit="span",
-        rotation=(0, 0, -math.pi / 2),
-    )
-    set_action_pose(imported, "TRex_Idle", 24)
+def make_godzilla(root: bpy.types.Object) -> bpy.types.Object:
+    """Build an original low-poly atomic kaiju with the classic Godzilla silhouette."""
+    godzilla = empty("Godzilla", root)
+    skin = material("Godzilla charcoal scales", "#020504", roughness=0.78)
+    skin_light = material("Godzilla scale highlights", "#07110e", roughness=0.72)
+    belly = material("Godzilla belly plates", "#17221b", roughness=0.8)
+    mouth = material("Godzilla mouth", "#321018", roughness=0.58)
+    teeth = material("Godzilla teeth and claws", "#eadbb8", roughness=0.68)
+    dorsal = material("Godzilla dorsal plates", "#001c25", roughness=0.3, emission=0.12)
+    dorsal_glow = material("Godzilla atomic cyan", "#00b9df", roughness=0.2, emission=1.05)
+    white = material("Godzilla awkward eye whites", "#fff9e9", roughness=0.28)
+    pupil = material("Godzilla awkward pupils", "#080b0c", roughness=0.22)
 
-    trex_palette = {
-        "Green": "#4f9f14",
-        "LightGreen": "#8ed51d",
-        "LightYellow": "#efe0a1",
-    }
-    for mesh_obj in hierarchy_meshes(imported):
-        for slot in mesh_obj.material_slots:
-            if not slot.material or slot.material.name not in trex_palette:
-                continue
-            slot.material.diffuse_color = rgb(trex_palette[slot.material.name])
-            bsdf = slot.material.node_tree.nodes.get("Principled BSDF") if slot.material.use_nodes else None
-            if bsdf:
-                bsdf.inputs["Base Color"].default_value = rgb(trex_palette[slot.material.name])
-                bsdf.inputs["Roughness"].default_value = 0.58
+    # Broad pear-shaped body and armored belly: immediately reads as an upright
+    # kaiju rather than a horizontal theropod.
+    ico("GodzillaPelvis", (1.72, 0.32, 1.18), (0.86, 0.62, 0.78), skin, subdivisions=2, parent=godzilla)
+    ico("GodzillaTorso", (1.68, 0.28, 1.98), (0.92, 0.68, 1.23), skin, subdivisions=2, parent=godzilla)
+    ico("GodzillaChest", (1.58, 0.18, 2.62), (0.96, 0.7, 0.76), skin_light, subdivisions=2, parent=godzilla)
+    for index, z in enumerate((1.45, 1.73, 2.01, 2.29, 2.55)):
+        box(f"GodzillaBellyPlate_{index}", (1.42, -0.39, z), (0.43 - index * 0.025, 0.055, 0.105), belly, bevel=0.055, parent=godzilla)
 
-    rig = imported_armature(imported)
-    head = rig.pose.bones.get("Head") if rig else None
-    if rig and head:
-        stare_at = rig.matrix_world @ head.tail
-    else:
-        stare_at = Vector((0.25, -0.1, 2.15))
-    white = material("Trex awkward eye whites", "#fff9e9", roughness=0.28)
-    pupil = material("Trex awkward pupils", "#111016", roughness=0.25)
-    eye_positions = [
-        stare_at + Vector((-0.08, -0.28, 0.16)),
-        stare_at + Vector((0.13, -0.25, 0.04)),
-    ]
+    # Heavy planted legs, wide feet, and individually modeled claws.
+    for side in (-1, 1):
+        x = 1.68 + side * 0.52
+        segment(f"GodzillaThigh_{side}", (x, 0.22, 1.3), (x + side * 0.16, 0.03, 0.62), 0.39, skin_light, end_radius=0.3, vertices=9, parent=godzilla)
+        segment(f"GodzillaShin_{side}", (x + side * 0.16, 0.03, 0.65), (x + side * 0.24, -0.08, 0.28), 0.31, skin, end_radius=0.25, vertices=9, parent=godzilla)
+        ico(f"GodzillaFoot_{side}", (x + side * 0.25, -0.35, 0.24), (0.48, 0.62, 0.22), skin_light, subdivisions=1, parent=godzilla)
+        for claw_index in range(3):
+            claw_x = x + side * 0.25 + (claw_index - 1) * 0.17
+            segment(f"GodzillaToeClaw_{side}_{claw_index}", (claw_x, -0.69, 0.26), (claw_x, -0.93 - abs(claw_index - 1) * 0.03, 0.2), 0.07, teeth, end_radius=0.018, vertices=7, parent=godzilla)
+
+    # Muscular but short arms with three visible hooked claws per hand.
+    for side in (-1, 1):
+        shoulder = (1.58 + side * 0.74, -0.02, 2.64)
+        elbow = (1.5 + side * 1.02, -0.35, 2.25)
+        wrist = (1.4 + side * 0.92, -0.64, 1.98)
+        segment(f"GodzillaUpperArm_{side}", shoulder, elbow, 0.25, skin_light, end_radius=0.19, vertices=9, parent=godzilla)
+        segment(f"GodzillaForearm_{side}", elbow, wrist, 0.2, skin, end_radius=0.14, vertices=9, parent=godzilla)
+        ico(f"GodzillaHand_{side}", wrist, (0.22, 0.18, 0.19), skin_light, subdivisions=1, parent=godzilla)
+        for claw_index in range(3):
+            start = (wrist[0] + side * (0.05 + claw_index * 0.045), wrist[1] - 0.08, wrist[2] - claw_index * 0.035)
+            end = (start[0] + side * 0.06, start[1] - 0.17, start[2] - 0.08)
+            segment(f"GodzillaHandClaw_{side}_{claw_index}", start, end, 0.035, teeth, end_radius=0.008, vertices=6, parent=godzilla)
+
+    # Neck and recognizable heavy reptilian skull aim left at the gorilla.
+    segment("GodzillaNeck", (1.62, 0.23, 2.75), (1.46, 0.08, 3.34), 0.54, skin, end_radius=0.44, vertices=10, parent=godzilla)
+    head = empty("GodzillaHead", godzilla)
+    ico("GodzillaCranium", (1.28, -0.02, 3.54), (0.62, 0.52, 0.5), skin_light, subdivisions=2, rot=(0, -0.12, 0), parent=head)
+    ico("GodzillaBrow", (0.98, -0.31, 3.67), (0.46, 0.24, 0.2), skin, subdivisions=1, rot=(0, -0.14, 0), parent=head)
+    ico("GodzillaUpperSnout", (0.75, -0.19, 3.47), (0.5, 0.35, 0.24), skin_light, subdivisions=2, rot=(0, -0.2, 0), parent=head)
+    ico("GodzillaLowerJaw", (0.76, -0.2, 3.23), (0.48, 0.32, 0.16), skin, subdivisions=1, rot=(0.08, -0.18, 0), parent=head)
+    box("GodzillaMouthGap", (0.69, -0.47, 3.35), (0.36, 0.035, 0.08), mouth, rot=(0, -0.15, 0), bevel=0.035, parent=head)
+    for tooth_index in range(7):
+        tx = 0.43 + tooth_index * 0.095
+        cone(f"GodzillaToothTop_{tooth_index}", (tx, -0.51, 3.4), 0.035, 0, 0.13, teeth, vertices=6, rot=(math.pi, 0, 0), parent=head)
+        if tooth_index % 2 == 0:
+            cone(f"GodzillaToothBottom_{tooth_index}", (tx, -0.51, 3.29), 0.03, 0, 0.11, teeth, vertices=6, parent=head)
+
+    # Oversized meme eyes lock sideways onto the gorilla, keeping the joke.
+    eye_positions = ((1.02, -0.48, 3.69), (1.3, -0.49, 3.63))
     for index, position in enumerate(eye_positions):
-        eyeball = ico(f"TrexStareEye_{index}", tuple(position), (0.15, 0.09, 0.17), white, subdivisions=2)
-        pupil_obj = ico(
-            f"TrexStarePupil_{index}",
-            tuple(position + Vector((-0.055, -0.085, -0.012))),
-            (0.045, 0.025, 0.06),
-            pupil,
-            subdivisions=2,
-        )
-        parent_keep_world(eyeball, trex)
-        parent_keep_world(pupil_obj, trex)
-    return trex
+        ico(f"GodzillaStareEye_{index}", position, (0.15, 0.085, 0.16), white, subdivisions=2, parent=head)
+        ico(f"GodzillaStarePupil_{index}", (position[0] - 0.055, position[1] - 0.075, position[2] - 0.005), (0.046, 0.022, 0.058), pupil, subdivisions=2, parent=head)
+
+    # Thick segmented tail arcs behind him; the last sections lie close to the
+    # platform so the silhouette feels massive without hiding the gorilla.
+    tail_points = [(2.15, 0.55, 1.25), (2.7, 0.78, 1.08), (3.2, 1.02, 0.83), (3.58, 1.25, 0.55), (3.85, 1.42, 0.35)]
+    for index in range(len(tail_points) - 1):
+        segment(f"GodzillaTail_{index}", tail_points[index], tail_points[index + 1], 0.42 - index * 0.075, skin if index % 2 else skin_light, end_radius=0.34 - index * 0.07, vertices=9, parent=godzilla)
+
+    # Iconic double-layer atomic dorsal plates continue from skull to tail.
+    dorsal_points = [
+        (1.62, 0.68, 3.38, 0.34), (1.72, 0.82, 3.02, 0.5), (1.78, 0.9, 2.57, 0.64),
+        (1.82, 0.92, 2.12, 0.58), (1.91, 0.91, 1.69, 0.49), (2.25, 1.03, 1.29, 0.38),
+        (2.67, 1.19, 1.05, 0.3), (3.08, 1.35, 0.8, 0.23),
+    ]
+    for index, (x, y, z, size) in enumerate(dorsal_points):
+        plate_size = size * (1.28 if index < 5 else 1.12)
+        ico(f"GodzillaDorsalPlate_{index}", (x, y, z + plate_size * 0.06), (plate_size * 0.72, plate_size * 0.17, plate_size), dorsal, subdivisions=1, rot=(0.08, index * 0.04, -0.08), parent=godzilla)
+        ico(f"GodzillaDorsalGlow_{index}", (x, y - 0.025, z + plate_size * 0.15), (plate_size * 0.48, plate_size * 0.1, plate_size * 0.72), dorsal_glow, subdivisions=1, rot=(0.08, index * 0.04, -0.08), parent=godzilla)
+    return godzilla
 
 
 def build_reactor() -> bpy.types.Object:
@@ -892,7 +922,7 @@ def build_reactor() -> bpy.types.Object:
             end = (start[0] + math.cos(angle) * 1.15, start[1] + math.sin(angle) * 0.8, 2.48 + math.sin(index) * 0.18)
             segment(f"PalmLeaf_{palm_x}_{index}", start, end, 0.11, leaf, end_radius=0.025, vertices=6, parent=root)
     make_gorilla(root)
-    make_trex(root)
+    make_godzilla(root)
     return root
 
 
@@ -1184,7 +1214,7 @@ def export_scene(scene_name: str, root: bpy.types.Object) -> None:
 SCENES = [
     ("nod", build_nod, (7.2, -12.8, 5.7), (0, 0.0, 2.35), PALETTE["cyan"]),
     ("scratch", build_scratch, (7.8, -12.2, 6.0), (0, 0.2, 1.7), PALETTE["violet"]),
-    ("reactor", build_reactor, (8.5, -13.2, 6.8), (0.1, 0.1, 1.65), PALETTE["acid"]),
+    ("reactor", build_reactor, (8.5, -13.2, 6.8), (0.1, 0.1, 1.65), "#38405e"),
     ("brain", build_brain, (8.2, -13.0, 6.4), (0.2, 0.2, 1.8), PALETTE["cyan"]),
     ("demo", build_demo, (9.0, -14.2, 7.4), (0.0, 0.0, 1.8), PALETTE["yellow"]),
 ]

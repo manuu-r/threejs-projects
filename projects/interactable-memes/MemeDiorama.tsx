@@ -39,7 +39,7 @@ type SceneActors = {
   nodBeard?: THREE.Object3D;
   cat?: THREE.Object3D;
   gorilla?: THREE.Object3D;
-  trex?: THREE.Object3D;
+  godzilla?: THREE.Object3D;
   reactor?: THREE.Object3D;
   morty?: THREE.Object3D;
   mortyArm?: THREE.Object3D;
@@ -54,7 +54,7 @@ type SceneActors = {
 const SCENE_URLS: Record<DioramaVariant, string> = {
   nod: "/interactable-memes/studio-models/nod.glb?v=11",
   scratch: "/interactable-memes/studio-models/scratch.glb?v=11",
-  reactor: "/interactable-memes/studio-models/reactor.glb?v=11",
+  reactor: "/interactable-memes/studio-models/reactor.glb?v=12",
   brain: "/interactable-memes/studio-models/brain.glb?v=11",
   demo: "/interactable-memes/studio-models/demo.glb?v=11",
 };
@@ -62,7 +62,7 @@ const SCENE_URLS: Record<DioramaVariant, string> = {
 const POSTER_URLS: Record<DioramaVariant, string> = {
   nod: "/interactable-memes/studio-previews/nod.png?v=11",
   scratch: "/interactable-memes/studio-previews/scratch.png?v=11",
-  reactor: "/interactable-memes/studio-previews/reactor.png?v=11",
+  reactor: "/interactable-memes/studio-previews/reactor.png?v=12",
   brain: "/interactable-memes/studio-previews/brain.png?v=11",
   demo: "/interactable-memes/studio-previews/demo.png?v=11",
 };
@@ -111,12 +111,12 @@ function collectActors(asset: THREE.Object3D): SceneActors {
     pills: namedChildren(asset, "Pill_").filter((object) => /^Pill_\d+$/.test(object.name)),
     portalRings: namedChildren(asset, "PortalRing_"),
     smoke: namedChildren(asset, "Smoke_"),
-    starePupils: namedChildren(asset, "TrexStarePupil_"),
+    starePupils: namedChildren(asset, "GodzillaStarePupil_"),
     nodHead: asset.getObjectByName("NodHead"),
     nodBeard: asset.getObjectByName("NodBeard"),
     cat: asset.getObjectByName("DJCat"),
     gorilla: asset.getObjectByName("Gorilla"),
-    trex: asset.getObjectByName("Trex"),
+    godzilla: asset.getObjectByName("Godzilla"),
     reactor: asset.getObjectByName("ReactorCore"),
     morty: asset.getObjectByName("Morty"),
     mortyArm: asset.getObjectByName("MortyPointArm"),
@@ -467,10 +467,10 @@ export function MemeDiorama({
           actors.gorilla.position.x = base.x - power * 0.035 - impact * 0.08;
           actors.gorilla.rotation.z = baseRotation(actors.gorilla).z - Math.sin(elapsed * 0.75) * (0.006 + power * 0.008) - impact * 0.035;
         }
-        if (actors.trex) {
-          const base = basePosition(actors.trex);
-          actors.trex.position.x = base.x - power * 0.06 - impact * 0.13;
-          actors.trex.rotation.z = baseRotation(actors.trex).z + Math.sin(elapsed * (0.65 + power * 0.08)) * (0.008 + power * 0.01) + impact * 0.04;
+        if (actors.godzilla) {
+          const base = basePosition(actors.godzilla);
+          actors.godzilla.position.x = base.x - power * 0.06 - impact * 0.13;
+          actors.godzilla.rotation.z = baseRotation(actors.godzilla).z + Math.sin(elapsed * (0.65 + power * 0.08)) * (0.008 + power * 0.01) + impact * 0.04;
         }
         actors.starePupils.forEach((pupil, index) => {
           const base = basePosition(pupil);
