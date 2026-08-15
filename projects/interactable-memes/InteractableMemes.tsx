@@ -71,7 +71,7 @@ export default function InteractableMemes() {
       </header>
 
       <section className="hero" id="top">
-        <Image className="hero-art" src="/interactable-memes/og-v4.png" alt="Low-poly 3D ensemble of the five interactive meme remakes" fill priority sizes="100vw" />
+        <Image className="hero-art" src="/interactable-memes/og-v5.png" alt="Interactable Memes ensemble in the polished low-poly studio art direction" fill priority sizes="100vw" />
         <div className="hero-shade" aria-hidden="true" />
         <div className="hero-noise" aria-hidden="true" />
         <div className="hero-copy">

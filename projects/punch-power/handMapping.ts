@@ -29,6 +29,8 @@ export type CalibratedHandFrame = {
 
 export const KNUCKLES = [5, 9, 13, 17] as const;
 export const CAMERA_FOCAL_X_NORMALIZED = 0.9;
+export const BAG_GUARD_GAP_MIN = 0.2;
+export const BAG_GUARD_GAP_MAX = 0.32;
 
 // The palm and metacarpophalangeal joints carry most of the hand's rigid-body
 // motion. Distal joints still contribute, but with lower weight so an opening
@@ -256,6 +258,28 @@ export function calculateDepthRatio(
   );
 }
 
+export function calculateReachMapping(cameraDistance: number, bagRadius: number) {
+  const safeCameraDistance = clamp(cameraDistance, 0.42, 1.35);
+  const guardGap = clamp(
+    safeCameraDistance * 0.31,
+    BAG_GUARD_GAP_MIN,
+    BAG_GUARD_GAP_MAX,
+  );
+  const expectedPunchTravel = clamp(
+    safeCameraDistance * 0.23,
+    0.14,
+    0.24,
+  );
+
+  return {
+    guardGap,
+    expectedPunchTravel,
+    punchGain:
+      (guardGap + Math.min(0.045, Math.max(0, bagRadius) * 0.08)) /
+      expectedPunchTravel,
+  };
+}
+
 export function mapLandmarkToScene(
   landmark: HandPoint,
   center: HandPoint,
@@ -268,7 +292,7 @@ export function mapLandmarkToScene(
   const forwardTravel = clamp(
     forwardMeters * frame.punchGain,
     -0.22,
-    frame.guardGap + frame.bagRadius * 0.34,
+    frame.guardGap + frame.bagRadius * 0.12,
   );
   const cameraX = (0.5 - landmark.x) / safeDepthRatio;
   const calibratedX = 0.5 - frame.midpointX;

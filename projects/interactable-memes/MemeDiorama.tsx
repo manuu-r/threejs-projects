@@ -48,19 +48,19 @@ type SceneActors = {
 };
 
 const SCENE_URLS: Record<DioramaVariant, string> = {
-  crossfire: "/interactable-memes/studio-models/crossfire-v7.glb",
-  scratch: "/interactable-memes/studio-models/scratch.glb",
-  reactor: "/interactable-memes/studio-models/reactor-v7.glb",
-  brain: "/interactable-memes/studio-models/brain.glb",
-  demo: "/interactable-memes/studio-models/demo-v7.glb",
+  crossfire: "/interactable-memes/studio-models/crossfire.glb?v=9",
+  scratch: "/interactable-memes/studio-models/scratch.glb?v=9",
+  reactor: "/interactable-memes/studio-models/reactor.glb?v=9",
+  brain: "/interactable-memes/studio-models/brain.glb?v=9",
+  demo: "/interactable-memes/studio-models/demo.glb?v=9",
 };
 
 const POSTER_URLS: Record<DioramaVariant, string> = {
-  crossfire: "/interactable-memes/studio-previews/crossfire-v7.png",
-  scratch: "/interactable-memes/studio-previews/scratch.png",
-  reactor: "/interactable-memes/studio-previews/reactor-v7.png",
-  brain: "/interactable-memes/studio-previews/brain.png",
-  demo: "/interactable-memes/studio-previews/demo-v7.png",
+  crossfire: "/interactable-memes/studio-previews/crossfire.png?v=9",
+  scratch: "/interactable-memes/studio-previews/scratch.png?v=9",
+  reactor: "/interactable-memes/studio-previews/reactor.png?v=9",
+  brain: "/interactable-memes/studio-previews/brain.png?v=9",
+  demo: "/interactable-memes/studio-previews/demo.png?v=9",
 };
 
 const BACKGROUNDS: Record<DioramaVariant, number> = {
@@ -133,8 +133,8 @@ function fitAsset(asset: THREE.Object3D, hero: boolean, variant: DioramaVariant)
   asset.updateMatrixWorld(true);
   const initial = new THREE.Box3().setFromObject(asset);
   const size = initial.getSize(new THREE.Vector3());
-  const targetWidth = variant === "demo" ? 4.2 : hero ? 8.25 : 7.8;
-  const targetHeight = variant === "demo" ? 3.9 : hero ? 5.15 : 4.95;
+  const targetWidth = variant === "demo" ? 6.3 : hero ? 8.25 : 7.8;
+  const targetHeight = variant === "demo" ? 5.2 : hero ? 5.15 : 4.95;
   const scale = Math.min(targetWidth / Math.max(size.x, 0.01), targetHeight / Math.max(size.y, 0.01));
   asset.scale.setScalar(scale);
   asset.updateMatrixWorld(true);
@@ -143,7 +143,7 @@ function fitAsset(asset: THREE.Object3D, hero: boolean, variant: DioramaVariant)
   if (variant === "demo") {
     const pivot = asset.getObjectByName("ExcavatorUpper");
     const pivotPosition = pivot?.getWorldPosition(new THREE.Vector3()) ?? center;
-    asset.position.set(-pivotPosition.x, -center.y - 0.12, -pivotPosition.z);
+    asset.position.set(-pivotPosition.x, -center.y - 0.15, -pivotPosition.z);
   } else {
     asset.position.set(-center.x, -center.y - 0.05, -center.z);
   }
@@ -207,7 +207,7 @@ export function MemeDiorama({
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.12;
+    renderer.toneMappingExposure = 1.18;
     renderer.domElement.className = `diorama-canvas${orbitable ? "" : " is-click-only"}`;
     renderer.domElement.tabIndex = 0;
     renderer.domElement.setAttribute("role", "button");
@@ -217,13 +217,13 @@ export function MemeDiorama({
     const background = BACKGROUNDS[variant];
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(background);
-    scene.fog = new THREE.FogExp2(background, 0.055);
+    scene.fog = new THREE.FogExp2(background, 0.026);
     const camera = new THREE.PerspectiveCamera(hero ? 34 : 38, 1, 0.1, 100);
-    const initialCameraDistance = variant === "demo" ? 10.25 : hero ? 9.2 : 8.65;
-    camera.position.set(0, 0.1, initialCameraDistance);
+    const cameraDistance = variant === "demo" ? 9.5 : hero ? 9.2 : 8.65;
+    camera.position.set(0, 0.1, cameraDistance);
 
-    scene.add(new THREE.HemisphereLight(0xfff4df, 0x10101a, 2.3));
-    const key = new THREE.DirectionalLight(0xfff6e7, 5.5);
+    scene.add(new THREE.HemisphereLight(0xfff4df, 0x08080d, 0.92));
+    const key = new THREE.DirectionalLight(0xfff6e7, 3.6);
     key.position.set(-4.2, 6.5, 6.5);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
@@ -232,10 +232,10 @@ export function MemeDiorama({
     key.shadow.camera.top = 7;
     key.shadow.camera.bottom = -7;
     scene.add(key);
-    const rim = new THREE.PointLight(new THREE.Color(accent), 54, 15, 1.7);
+    const rim = new THREE.PointLight(new THREE.Color(accent), 39, 15, 1.7);
     rim.position.set(4.2, 2.3, 4.5);
     scene.add(rim);
-    const fill = new THREE.PointLight(0x7448ff, 32, 13, 1.8);
+    const fill = new THREE.PointLight(0x7448ff, 19, 13, 1.8);
     fill.position.set(-4.5, -1.4, 4.2);
     scene.add(fill);
 
@@ -261,6 +261,7 @@ export function MemeDiorama({
     let scratchVelocity = 0;
     let previousMotion = stateRef.current.motion;
     let fallProgress = stateRef.current.motion > 0 ? 1 : 0;
+    let demoSpinAngle = 0;
     const timer = new THREE.Timer();
     timer.connect(document);
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -306,7 +307,7 @@ export function MemeDiorama({
       renderer.setSize(width, height, false);
       camera.aspect = width / Math.max(height, 1);
       camera.position.z = variant === "demo"
-        ? width < 560 ? 12.1 : 10.25
+        ? width < 560 ? 11.2 : 9.5
         : width < 560 ? (hero ? 10.8 : 10.1) : (hero ? 9.2 : 8.65);
       camera.updateProjectionMatrix();
     }
@@ -391,9 +392,9 @@ export function MemeDiorama({
         if (actors.officeHero) {
           const position = basePosition(actors.officeHero);
           const rotation = baseRotation(actors.officeHero);
-          actors.officeHero.position.x = position.x + fall * 0.42;
-          actors.officeHero.position.y = position.y - fall * 1.18;
-          actors.officeHero.position.z = position.z + fall * 0.22;
+          actors.officeHero.position.x = position.x + fall * 0.16;
+          actors.officeHero.position.y = position.y - fall * 0.62;
+          actors.officeHero.position.z = position.z + fall * 0.16;
           actors.officeHero.rotation.x = rotation.x + fall * 0.12;
           actors.officeHero.rotation.z = rotation.z - fall * 1.34 - impact * 0.1 + (reducedMotion ? 0 : Math.sin(elapsed * 1.1) * 0.008);
         }
@@ -443,7 +444,8 @@ export function MemeDiorama({
         }
         if (actors.excavatorUpper) {
           const base = baseRotation(actors.excavatorUpper);
-          actors.excavatorUpper.rotation.y = base.y + elapsed * (0.24 + panic * 0.16) + impact * 0.28;
+          demoSpinAngle += delta * (0.22 + panic * 0.18);
+          actors.excavatorUpper.rotation.y = base.y + demoSpinAngle + impact * 0.18;
         }
         if (actors.excavatorArm) {
           const base = baseRotation(actors.excavatorArm);

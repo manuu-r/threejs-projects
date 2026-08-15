@@ -4,6 +4,7 @@ import {
   calculateCalibration,
   calculateDepthRatio,
   calculatePenetrationCorrection,
+  calculateReachMapping,
   calculateWholeHandVelocity,
   fuseForearmVelocity,
   handCenter,
@@ -39,7 +40,10 @@ function frameFor(
   calibration: ReturnType<typeof calculateCalibration>,
 ): CalibratedHandFrame {
   const bagRadius = 0.5;
-  const guardGap = 0.42;
+  const { guardGap, punchGain } = calculateReachMapping(
+    calibration.cameraDistance,
+    bagRadius,
+  );
   return {
     midpointX: calibration.midpointX,
     midpointY: calibration.midpointY,
@@ -50,9 +54,20 @@ function frameFor(
     bagCenter: { x: 0, y: 3, z: 0 },
     bagRadius,
     guardGap,
-    punchGain: guardGap / Math.min(0.32, calibration.cameraDistance * 0.3),
+    punchGain,
   };
 }
+
+test("calibration puts the bag inside a short seated punching reach", () => {
+  for (const cameraDistance of [0.42, 0.78, 1.35]) {
+    const mapping = calculateReachMapping(cameraDistance, 0.5);
+    assert.ok(mapping.guardGap >= 0.2);
+    assert.ok(mapping.guardGap <= 0.32);
+    assert.ok(mapping.expectedPunchTravel >= 0.14);
+    assert.ok(mapping.expectedPunchTravel <= 0.24);
+    assert.ok(mapping.punchGain > 1);
+  }
+});
 
 test("larger apparent palms are measured as closer to the webcam", () => {
   const hands = [makeHand(0.38), makeHand(0.62)];

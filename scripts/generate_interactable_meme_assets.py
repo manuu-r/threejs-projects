@@ -25,12 +25,6 @@ SOURCE_DIR = REPO / "art" / "interactable-memes"
 LICENSED_MODEL_DIR = REPO / "public" / "interactable-memes" / "models"
 HAND_MODEL_DIR = REPO / "public" / "assets" / "hands"
 
-ASSET_REVISIONS = {
-    "crossfire": "v7",
-    "reactor": "v7",
-    "demo": "v7",
-}
-
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
 SOURCE_DIR.mkdir(parents=True, exist_ok=True)
@@ -68,7 +62,10 @@ PALETTE = {
 def reset_scene() -> None:
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete(use_global=False)
-    for datablocks in (bpy.data.meshes, bpy.data.curves, bpy.data.cameras, bpy.data.lights):
+    # Materials must be cleared too: every diorama deliberately reuses semantic
+    # names such as "Platform" with a different palette. Keeping the previous
+    # scene's material datablocks made every later set look pale and unfinished.
+    for datablocks in (bpy.data.meshes, bpy.data.curves, bpy.data.cameras, bpy.data.lights, bpy.data.materials):
         for datablock in list(datablocks):
             datablocks.remove(datablock)
 
@@ -400,59 +397,58 @@ def parent_keep_world(obj: bpy.types.Object, parent: bpy.types.Object) -> None:
     obj.matrix_world = world_matrix
 
 
-def baked_static_meshes(objects: list[bpy.types.Object], parent: bpy.types.Object) -> list[bpy.types.Object]:
-    """Freeze an evaluated character pose into ordinary meshes for reliable GLB playback."""
+def baked_static_meshes(
+    objects: list[bpy.types.Object],
+    parent: bpy.types.Object,
+    *,
+    target_size: float,
+    location: tuple[float, float, float],
+    fit: str,
+    center_location: bool = False,
+) -> list[bpy.types.Object]:
+    """Freeze an evaluated pose so the GLB cannot fall back to a T-pose."""
     depsgraph = bpy.context.evaluated_depsgraph_get()
     meshes = hierarchy_meshes(objects)
     baked: list[bpy.types.Object] = []
     for mesh_obj in meshes:
-        world_matrix = mesh_obj.matrix_world.copy()
+        relative_matrix = parent.matrix_world.inverted() @ mesh_obj.matrix_world
         evaluated = mesh_obj.evaluated_get(depsgraph)
-        baked_data = bpy.data.meshes.new_from_object(evaluated, preserve_all_data_layers=True, depsgraph=depsgraph)
+        baked_data = bpy.data.meshes.new_from_object(
+            evaluated,
+            preserve_all_data_layers=True,
+            depsgraph=depsgraph,
+        )
+        baked_data.transform(relative_matrix)
+        old_data = mesh_obj.data
         mesh_obj.data = baked_data
         mesh_obj.modifiers.clear()
         mesh_obj.parent = parent
-        mesh_obj.matrix_world = world_matrix
+        mesh_obj.matrix_parent_inverse.identity()
+        mesh_obj.matrix_basis.identity()
         for polygon in mesh_obj.data.polygons:
             polygon.use_smooth = True
+        if old_data.users == 0:
+            bpy.data.meshes.remove(old_data)
         baked.append(mesh_obj)
     for obj in list(objects):
         if obj not in baked and obj.name in bpy.context.scene.objects:
             bpy.data.objects.remove(obj, do_unlink=True)
     bpy.context.view_layer.update()
+
+    low, high = world_bounds(baked)
+    size = high - low
+    metric = size.z if fit == "height" else max(size.x, size.y, size.z)
+    correction = target_size / max(metric, 0.001)
+    parent.scale = tuple(axis * correction for axis in parent.scale)
+    bpy.context.view_layer.update()
+    low, high = world_bounds(baked)
+    center = (low + high) * 0.5
+    anchor = center if center_location else Vector((center.x, center.y, low.z))
+    world_matrix = parent.matrix_world.copy()
+    world_matrix.translation += Vector(location) - anchor
+    parent.matrix_world = world_matrix
+    bpy.context.view_layer.update()
     return baked
-
-
-def compact_curled_fingers(meshes: list[bpy.types.Object]) -> None:
-    """Tuck the three inactive fingers into a compact fist instead of leaving loose arcs."""
-    finger_names = ("middle-finger", "ring-finger", "pinky-finger")
-    for mesh_obj in meshes:
-        compact_groups = {
-            group.index
-            for group in mesh_obj.vertex_groups
-            if any(name in group.name for name in finger_names) and "metacarpal" not in group.name
-        }
-        anchor_groups = {
-            group.index
-            for group in mesh_obj.vertex_groups
-            if any(name in group.name for name in finger_names) and "metacarpal" in group.name
-        }
-        anchor_vertices = [
-            vertex.co.copy()
-            for vertex in mesh_obj.data.vertices
-            if any(group.group in anchor_groups and group.weight > 0.2 for group in vertex.groups)
-        ]
-        if not compact_groups or not anchor_vertices:
-            continue
-        anchor = sum(anchor_vertices, Vector()) / len(anchor_vertices)
-        for vertex in mesh_obj.data.vertices:
-            weight = max(
-                (group.weight for group in vertex.groups if group.group in compact_groups),
-                default=0.0,
-            )
-            if weight > 0:
-                vertex.co = vertex.co.lerp(anchor, min(0.42, weight * 0.38))
-        mesh_obj.data.update()
 
 
 def pose_webxr_finger_gun(objects: list[bpy.types.Object]) -> None:
@@ -461,7 +457,7 @@ def pose_webxr_finger_gun(objects: list[bpy.types.Object]) -> None:
         return
     for finger in ("middle", "ring", "pinky"):
         for joint, curl in (
-            ("metacarpal", 0.18),
+            ("metacarpal", 0.22),
             ("phalanx-proximal", 1.62),
             ("phalanx-intermediate", 1.88),
             ("phalanx-distal", 1.46),
@@ -483,7 +479,14 @@ def make_business_man(root: bpy.types.Object) -> bpy.types.Object:
         location=(0, -0.05, 0.2),
         fit="height",
     )
-    set_action_pose(imported, "Idle_Gun_Pointing", 18)
+    set_action_pose(imported, "Idle_Neutral", 18)
+    baked_static_meshes(
+        imported,
+        man,
+        target_size=3.65,
+        location=(0, -0.05, 0.2),
+        fit="height",
+    )
     return man
 
 
@@ -499,13 +502,19 @@ def make_finger_gun(name: str, loc: tuple[float, float, float], side: int, paren
         target_size=1.82,
         location=loc,
         fit="span",
-        rotation=(side * 0.38, -side * math.pi / 2, side * 0.12),
+        rotation=(side * 0.28, -side * 1.24, side * 0.1),
         center_location=True,
     )
     pose_webxr_finger_gun(imported)
     recolor_imported_meshes(imported, skin)
-    baked = baked_static_meshes(imported, gun)
-    compact_curled_fingers(baked)
+    baked_static_meshes(
+        imported,
+        gun,
+        target_size=1.82,
+        location=loc,
+        fit="span",
+        center_location=True,
+    )
     sleeve_start = (loc[0] - side * 1.38, loc[1] + 0.12, loc[2] - 0.02)
     sleeve_end = (loc[0] - side * 0.58, loc[1] + 0.03, loc[2])
     segment(name + "_Sleeve", sleeve_start, sleeve_end, 0.3, sleeve, end_radius=0.22, parent=parent)
@@ -546,19 +555,21 @@ def build_crossfire() -> bpy.types.Object:
 
 def make_cat(root: bpy.types.Object) -> bpy.types.Object:
     cat = empty("DJCat", root)
-    fur = material("Cat fur", "#342f35", roughness=0.78)
-    fur_light = material("Cat muzzle", "#d5c7b7", roughness=0.74)
-    pink = material("Cat ears", "#d8838b", roughness=0.68)
+    fur = material("Cat fur", "#24232a", roughness=0.76)
+    fur_light = material("Cat white fur", "#e6d8c6", roughness=0.72)
+    pink = material("Cat ears", "#db7f8a", roughness=0.66)
     black = material("Glasses", "#07070a", roughness=0.25, metallic=0.12)
     pixel = material("Glasses shine", PALETTE["white"], roughness=0.25, emission=0.15)
-    ico("CatBody", (0, 0.25, 1.2), (0.7, 0.55, 1.0), fur, subdivisions=2, parent=cat)
-    ico("CatHead", (0, -0.03, 2.28), (0.74, 0.58, 0.68), fur, subdivisions=2, parent=cat)
+    ico("CatBody", (0, 0.25, 1.24), (0.76, 0.58, 1.02), fur, subdivisions=2, parent=cat)
+    ico("CatBib", (0, -0.45, 1.38), (0.4, 0.12, 0.7), fur_light, subdivisions=2, parent=cat)
+    ico("CatHead", (0, -0.03, 2.34), (0.78, 0.6, 0.7), fur, subdivisions=2, parent=cat)
     cone("CatEar_L", (-0.44, 0.02, 2.93), 0.36, 0, 0.76, fur, vertices=5, rot=(0, -0.1, -0.18), parent=cat)
     cone("CatEar_R", (0.44, 0.02, 2.93), 0.36, 0, 0.76, fur, vertices=5, rot=(0, 0.1, 0.18), parent=cat)
     cone("CatEarInner_L", (-0.44, -0.1, 2.93), 0.2, 0, 0.46, pink, vertices=5, rot=(0, -0.1, -0.18), parent=cat)
     cone("CatEarInner_R", (0.44, -0.1, 2.93), 0.2, 0, 0.46, pink, vertices=5, rot=(0, 0.1, 0.18), parent=cat)
-    ico("CatMuzzle", (0, -0.58, 2.16), (0.48, 0.19, 0.29), fur_light, subdivisions=2, parent=cat)
-    cone("CatNose", (0, -0.8, 2.26), 0.1, 0, 0.14, pink, vertices=5, rot=(math.pi / 2, 0, 0), parent=cat)
+    ico("CatMuzzle_L", (-0.2, -0.59, 2.18), (0.3, 0.18, 0.26), fur_light, subdivisions=2, parent=cat)
+    ico("CatMuzzle_R", (0.2, -0.59, 2.18), (0.3, 0.18, 0.26), fur_light, subdivisions=2, parent=cat)
+    cone("CatNose", (0, -0.8, 2.28), 0.1, 0, 0.14, pink, vertices=5, rot=(math.pi / 2, 0, 0), parent=cat)
     for side in (-1, 1):
         box(f"Shade_{side}", (0.28 * side, -0.63, 2.48), (0.26, 0.06, 0.18), black, bevel=0.04, parent=cat)
         for px in range(3):
@@ -567,6 +578,10 @@ def make_cat(root: bpy.types.Object) -> bpy.types.Object:
     for side in (-1, 1):
         segment(f"CatArm_{side}", (0.45 * side, 0, 1.55), (0.95 * side, -0.58, 1.15), 0.18, fur, end_radius=0.14, parent=cat)
         ico(f"CatPaw_{side}", (0.98 * side, -0.62, 1.12), (0.24, 0.18, 0.16), fur_light, subdivisions=1, parent=cat)
+    # A high, segmented tail gives the silhouette the same confident attitude
+    # as the hero artwork even when the camera is orbiting.
+    segment("CatTailLower", (0.55, 0.45, 1.05), (0.98, 0.55, 1.75), 0.14, fur, end_radius=0.11, parent=cat)
+    segment("CatTailUpper", (0.98, 0.55, 1.75), (0.78, 0.5, 2.35), 0.11, fur, end_radius=0.07, parent=cat)
     return cat
 
 
@@ -600,6 +615,19 @@ def build_scratch() -> bpy.types.Object:
     box("DJBoothGlow", (0, -0.5, 0.58), (3.1, 0.035, 0.34), glow, bevel=0.03, parent=root)
     make_turntable("Platter_L", -1.2, root)
     make_turntable("Platter_R", 1.2, root)
+    mixer = material("Mixer", "#15131a", roughness=0.34, metallic=0.18)
+    box("MixerBody", (0, -0.72, 1.1), (0.52, 0.55, 0.13), mixer, bevel=0.06, parent=root)
+    for row in range(3):
+        for col in range(4):
+            cylinder(
+                f"MixerKnob_{row}_{col}",
+                (-0.32 + col * 0.21, -1.05 + row * 0.22, 1.27),
+                0.045,
+                0.08,
+                glow if (row + col) % 2 else mixer,
+                vertices=10,
+                parent=root,
+            )
     speaker_body = material("Speaker body", "#111116", roughness=0.34)
     speaker_cone = material("Speaker cone", "#28232f", roughness=0.38)
     for side in (-1, 1):
@@ -619,44 +647,19 @@ def make_gorilla(root: bpy.types.Object) -> bpy.types.Object:
         LICENSED_MODEL_DIR / "gorilla.glb",
         "Gorilla",
         root,
-        target_size=2.7,
-        location=(-1.55, 0.4, 0.22),
+        target_size=3.15,
+        location=(-1.55, 0.22, 0.24),
         fit="height",
-        rotation=(0, 0, 0.4),
+        rotation=(0, 0, 0.48),
     )
-
-    # Squat and hunch the stock knuckle-walking mesh into the meme's seated silhouette.
     for mesh_obj in hierarchy_meshes(imported):
-        for vertex in mesh_obj.data.vertices:
-            z = vertex.co.z
-            if z < 2:
-                squat = min(1.0, max(0.0, (2 - z) / 82))
-                vertex.co.z += squat * 37
-                vertex.co.x *= 1 + squat * 0.22
-                vertex.co.y += squat * 8
-            elif z > 8:
-                hunch = min(1.0, (z - 8) / 72)
-                vertex.co.y -= hunch * 11
-                vertex.co.z -= hunch * 7
-        mesh_obj.data.update()
-    bpy.context.view_layer.update()
-    low, _ = world_bounds(imported)
-    world_matrix = gorilla.matrix_world.copy()
-    world_matrix.translation.z += 0.22 - low.z
-    gorilla.matrix_world = world_matrix
-
-    fur = material("Seated gorilla fur", "#292c27", roughness=0.84)
-    belly = material("Seated gorilla belly", "#393b34", roughness=0.82)
-    skin = material("Seated gorilla hands", "#31322d", roughness=0.78)
-    ico("GorillaBelly", (-1.55, -0.18, 1.12), (0.69, 0.52, 0.78), belly, subdivisions=2, parent=root)
-    for side in (-1, 1):
-        hip_x = -1.55 + side * 0.55
-        knee_x = -1.55 + side * 0.83
-        ico(f"GorillaHaunch_{side}", (hip_x, 0.08, 0.62), (0.56, 0.55, 0.52), fur, subdivisions=2, parent=root)
-        segment(f"GorillaThigh_{side}", (hip_x, -0.02, 0.72), (knee_x, -0.62, 0.46), 0.28, fur, end_radius=0.24, parent=root)
-        ico(f"GorillaFoot_{side}", (knee_x, -0.9, 0.3), (0.38, 0.48, 0.22), skin, subdivisions=2, parent=root)
-        segment(f"GorillaRestingArm_{side}", (-1.55 + side * 0.44, -0.02, 1.62), (knee_x, -0.68, 0.78), 0.18, fur, end_radius=0.14, parent=root)
-        ico(f"GorillaRestingHand_{side}", (knee_x, -0.7, 0.7), (0.28, 0.24, 0.18), skin, subdivisions=2, parent=root)
+        for slot in mesh_obj.material_slots:
+            if not slot.material:
+                continue
+            bsdf = slot.material.node_tree.nodes.get("Principled BSDF") if slot.material.use_nodes else None
+            if bsdf and "black" in slot.material.name.lower():
+                bsdf.inputs["Base Color"].default_value = rgb("#171817")
+                bsdf.inputs["Roughness"].default_value = 0.72
     return gorilla
 
 
@@ -671,6 +674,21 @@ def make_trex(root: bpy.types.Object) -> bpy.types.Object:
         rotation=(0, 0, -math.pi / 2),
     )
     set_action_pose(imported, "TRex_Idle", 24)
+
+    trex_palette = {
+        "Green": "#4f9f14",
+        "LightGreen": "#8ed51d",
+        "LightYellow": "#efe0a1",
+    }
+    for mesh_obj in hierarchy_meshes(imported):
+        for slot in mesh_obj.material_slots:
+            if not slot.material or slot.material.name not in trex_palette:
+                continue
+            slot.material.diffuse_color = rgb(trex_palette[slot.material.name])
+            bsdf = slot.material.node_tree.nodes.get("Principled BSDF") if slot.material.use_nodes else None
+            if bsdf:
+                bsdf.inputs["Base Color"].default_value = rgb(trex_palette[slot.material.name])
+                bsdf.inputs["Roughness"].default_value = 0.58
 
     rig = imported_armature(imported)
     head = rig.pose.bones.get("Head") if rig else None
@@ -700,7 +718,7 @@ def make_trex(root: bpy.types.Object) -> bpy.types.Object:
 
 def build_reactor() -> bpy.types.Object:
     root = empty("ReactorScene")
-    base_platform(root, "#26321f", "#79a93f", shape="round")
+    base_platform(root, "#151b13", "#74b72d", shape="round")
     rock = material("Habitat rock", "#5a574d", roughness=0.9)
     grass = material("Habitat grass", "#3c6c2e", roughness=0.86)
     bark = material("Palm bark", "#6d4828", roughness=0.9)
@@ -729,24 +747,34 @@ def make_morty(root: bpy.types.Object) -> bpy.types.Object:
     pants = material("Morty pants", "#426ab5", roughness=0.66)
     backpack = material("Morty backpack", "#b92d3e", roughness=0.66)
     hair = material("Morty hair", "#6b3a21", roughness=0.74)
-    box("MortyTorso", (-1.08, 0, 1.25), (0.48, 0.31, 0.64), shirt, bevel=0.13, parent=boy)
-    box("MortyPants", (-1.08, 0, 0.58), (0.48, 0.32, 0.24), pants, bevel=0.1, parent=boy)
-    box("MortyBackpack", (-1.08, 0.33, 1.28), (0.42, 0.18, 0.58), backpack, bevel=0.12, parent=boy)
-    ico("MortyHead", (-1.08, -0.05, 2.28), (0.62, 0.5, 0.68), skin, subdivisions=2, parent=boy)
-    for index in range(10):
-        angle = index / 10 * math.tau
-        ico(f"MortyHair_{index}", (-1.08 + math.cos(angle) * 0.45, 0.08, 2.65 + math.sin(angle) * 0.28), (0.18, 0.14, 0.18), hair, subdivisions=1, parent=boy)
-    eye("MortyEye_L", (-1.3, -0.5, 2.35), 1.05, boy)
-    eye("MortyEye_R", (-0.87, -0.5, 2.35), 1.05, boy)
-    box("MortyMouth", (-1.08, -0.56, 2.02), (0.2, 0.03, 0.08), material("Morty mouth", "#551b22"), bevel=0.04, parent=boy)
+    mouth = material("Morty mouth", "#471820", roughness=0.45)
+    shoe = material("Morty shoes", "#e9e8df", roughness=0.68)
+    cone("MortyTorso", (-1.08, 0, 1.28), 0.5, 0.42, 1.12, shirt, vertices=10, parent=boy)
+    box("MortyPants", (-1.08, 0, 0.66), (0.48, 0.33, 0.24), pants, bevel=0.1, parent=boy)
+    box("MortyBackpack", (-1.08, 0.34, 1.32), (0.43, 0.2, 0.52), backpack, bevel=0.14, parent=boy)
+    ico("MortyHairCap", (-1.08, 0.08, 2.43), (0.67, 0.48, 0.66), hair, subdivisions=2, parent=boy)
+    ico("MortyHead", (-1.08, -0.09, 2.29), (0.61, 0.5, 0.65), skin, subdivisions=2, parent=boy)
+    for index in range(7):
+        x = -1.47 + index * 0.13
+        cone(f"MortyHairline_{index}", (x, -0.48, 2.69 + math.sin(index) * 0.045), 0.1, 0, 0.24, hair, vertices=6, rot=(0, 0, math.pi), parent=boy)
+    eye("MortyEye_L", (-1.3, -0.52, 2.37), 1.08, boy)
+    eye("MortyEye_R", (-0.87, -0.52, 2.37), 1.08, boy)
+    ico("MortyNose", (-1.08, -0.63, 2.22), (0.09, 0.07, 0.11), skin, subdivisions=1, parent=boy)
+    box("MortyMouth", (-1.08, -0.59, 1.99), (0.22, 0.035, 0.12), mouth, bevel=0.07, parent=boy)
+    box("MortyTeeth", (-1.08, -0.63, 2.04), (0.15, 0.022, 0.03), material("Morty teeth", PALETTE["white"]), bevel=0.01, parent=boy)
     for side in (-1, 1):
         x = -1.08 + side * 0.34
-        segment(f"MortyLeg_{side}", (x, 0, 0.54), (x + side * 0.04, 0, 0.08), 0.15, pants, end_radius=0.12, parent=boy)
+        segment(f"MortyLeg_{side}", (x, 0, 0.58), (x + side * 0.04, -0.02, 0.16), 0.15, pants, end_radius=0.12, parent=boy)
+        box(f"MortyShoe_{side}", (x + side * 0.05, -0.12, 0.08), (0.2, 0.3, 0.09), shoe, bevel=0.06, parent=boy)
     arm = empty("MortyPointArm", boy)
-    arm.location = (-1.47, -0.02, 1.48)
-    segment("MortyPointUpper", (0, 0, 0), (-0.45, -0.25, 0.16), 0.14, skin, end_radius=0.11, parent=arm)
-    segment("MortyPointFinger", (-0.45, -0.25, 0.16), (-0.95, -0.3, 0.22), 0.065, skin, end_radius=0.04, parent=arm)
-    segment("MortyOtherArm", (-0.7, -0.02, 1.48), (-0.52, -0.3, 1.05), 0.14, skin, end_radius=0.1, parent=boy)
+    arm.location = (-1.43, -0.03, 1.58)
+    segment("MortyPointSleeve", (0, 0, 0), (-0.2, -0.12, 0.04), 0.18, shirt, end_radius=0.15, parent=arm)
+    segment("MortyPointUpper", (-0.2, -0.12, 0.04), (-0.58, -0.3, 0.12), 0.13, skin, end_radius=0.1, parent=arm)
+    ico("MortyPointHand", (-0.62, -0.31, 0.13), (0.17, 0.12, 0.14), skin, subdivisions=1, parent=arm)
+    segment("MortyPointFinger", (-0.68, -0.34, 0.17), (-1.06, -0.38, 0.2), 0.055, skin, end_radius=0.035, parent=arm)
+    segment("MortyOtherSleeve", (-0.71, -0.02, 1.58), (-0.54, -0.15, 1.55), 0.18, shirt, end_radius=0.14, parent=boy)
+    segment("MortyOtherArm", (-0.54, -0.15, 1.55), (-0.48, -0.34, 1.13), 0.13, skin, end_radius=0.1, parent=boy)
+    ico("MortyOtherHand", (-0.48, -0.35, 1.08), (0.16, 0.12, 0.16), skin, subdivisions=1, parent=boy)
     return boy
 
 
@@ -757,32 +785,43 @@ def make_rick(root: bpy.types.Object) -> bpy.types.Object:
     shirt = material("Rick shirt", "#8ad9d7", roughness=0.58)
     pants = material("Rick pants", "#4a3a2c", roughness=0.68)
     hair = material("Rick hair", "#87bfd3", roughness=0.58, emission=0.08)
-    box("RickTorso", (1.15, 0.08, 1.42), (0.58, 0.34, 0.8), coat, bevel=0.13, parent=rick)
-    box("RickShirt", (1.15, -0.3, 1.45), (0.3, 0.045, 0.64), shirt, bevel=0.04, parent=rick)
-    ico("RickHead", (1.15, -0.03, 2.65), (0.54, 0.45, 0.64), skin, subdivisions=2, parent=rick)
-    eye("RickEye_L", (0.96, -0.44, 2.73), 0.9, rick)
-    eye("RickEye_R", (1.34, -0.44, 2.73), 0.9, rick)
-    box("RickMouth", (1.15, -0.5, 2.39), (0.28, 0.03, 0.1), material("Rick mouth", "#55222b"), bevel=0.04, parent=rick)
-    for index in range(11):
-        angle = -1.35 + index * 0.27
-        cone(
-            f"RickHair_{index}",
-            (1.15 + math.sin(angle) * 0.49, 0.03, 3.12 + math.cos(angle) * 0.3),
-            0.19,
-            0,
-            0.72,
-            hair,
-            vertices=6,
-            rot=(0, angle * 0.2, -angle),
-            parent=rick,
-        )
+    mouth = material("Rick mouth", "#541823", roughness=0.44)
+    belt = material("Rick belt", "#171515", roughness=0.5)
+    cone("RickTorso", (1.15, 0.08, 1.5), 0.68, 0.5, 1.52, coat, vertices=10, parent=rick)
+    box("RickShirt", (1.15, -0.43, 1.5), (0.3, 0.05, 0.62), shirt, bevel=0.05, parent=rick)
+    box("RickLapel_L", (0.88, -0.47, 1.75), (0.18, 0.035, 0.5), coat, rot=(0, 0, -0.25), bevel=0.03, parent=rick)
+    box("RickLapel_R", (1.42, -0.47, 1.75), (0.18, 0.035, 0.5), coat, rot=(0, 0, 0.25), bevel=0.03, parent=rick)
+    box("RickBelt", (1.15, -0.39, 0.86), (0.48, 0.06, 0.08), belt, bevel=0.02, parent=rick)
+    box("RickCoatTail_L", (0.84, 0.08, 0.76), (0.29, 0.32, 0.48), coat, rot=(0, 0.08, 0.08), bevel=0.08, parent=rick)
+    box("RickCoatTail_R", (1.46, 0.08, 0.76), (0.29, 0.32, 0.48), coat, rot=(0, -0.08, -0.08), bevel=0.08, parent=rick)
+    ico("RickHairScalp", (1.15, 0.04, 2.78), (0.59, 0.43, 0.62), hair, subdivisions=1, parent=rick)
+    ico("RickHead", (1.15, -0.1, 2.63), (0.55, 0.46, 0.66), skin, subdivisions=2, parent=rick)
+    eye("RickEye_L", (0.96, -0.5, 2.72), 0.94, rick)
+    eye("RickEye_R", (1.34, -0.5, 2.72), 0.94, rick)
+    box("RickBrow_L", (0.96, -0.62, 2.9), (0.18, 0.025, 0.035), hair, rot=(0, 0, -0.14), bevel=0.01, parent=rick)
+    box("RickBrow_R", (1.34, -0.62, 2.9), (0.18, 0.025, 0.035), hair, rot=(0, 0, 0.14), bevel=0.01, parent=rick)
+    ico("RickNose", (1.15, -0.62, 2.55), (0.1, 0.08, 0.14), skin, subdivisions=1, parent=rick)
+    box("RickMouth", (1.15, -0.59, 2.3), (0.3, 0.035, 0.15), mouth, bevel=0.08, parent=rick)
+    box("RickTeeth", (1.15, -0.63, 2.36), (0.22, 0.02, 0.04), material("Rick teeth", PALETTE["white"]), bevel=0.01, parent=rick)
+    for index in range(12):
+        angle = index / 12 * math.tau
+        start = (1.15 + math.cos(angle) * 0.36, 0.06, 2.86 + math.sin(angle) * 0.38)
+        end = (1.15 + math.cos(angle) * 0.82, 0.08, 2.95 + math.sin(angle) * 0.82)
+        segment(f"RickHair_{index}", start, end, 0.18, hair, end_radius=0.025, vertices=7, parent=rick)
     for side in (-1, 1):
         x = 1.15 + side * 0.3
-        segment(f"RickLeg_{side}", (x, 0.05, 0.75), (x + side * 0.05, 0, 0.08), 0.17, pants, end_radius=0.13, parent=rick)
+        segment(f"RickLeg_{side}", (x, 0.05, 0.79), (x + side * 0.05, -0.02, 0.11), 0.17, pants, end_radius=0.13, parent=rick)
+        box(f"RickShoe_{side}", (x + side * 0.06, -0.14, 0.08), (0.21, 0.32, 0.09), belt, bevel=0.06, parent=rick)
         shoulder = (1.15 + side * 0.52, 0, 1.78)
-        hand = (1.15 + side * 0.95, -0.28, 1.37 + (0.3 if side == -1 else 0))
-        segment(f"RickArm_{side}", shoulder, hand, 0.16, coat, end_radius=0.1, parent=rick)
+        elbow = (1.15 + side * 0.78, -0.18, 1.64 + (0.3 if side == -1 else 0.12))
+        hand = (1.15 + side * 1.05, -0.42, 1.58 + (0.52 if side == -1 else 0.16))
+        segment(f"RickSleeve_{side}", shoulder, elbow, 0.2, coat, end_radius=0.15, parent=rick)
+        segment(f"RickArm_{side}", elbow, hand, 0.13, skin, end_radius=0.1, parent=rick)
         ico(f"RickHand_{side}", hand, (0.16, 0.12, 0.18), skin, subdivisions=1, parent=rick)
+        for finger in range(3):
+            start = (hand[0] + side * 0.07, hand[1] - 0.02, hand[2] + (finger - 1) * 0.055)
+            end = (start[0] + side * (0.17 + finger * 0.02), start[1] - 0.04, start[2] + (finger - 1) * 0.035)
+            segment(f"RickFinger_{side}_{finger}", start, end, 0.025, skin, end_radius=0.014, vertices=7, parent=rick)
     return rick
 
 
@@ -874,7 +913,7 @@ def make_plane(parent: bpy.types.Object) -> bpy.types.Object:
         LICENSED_MODEL_DIR / "small-airplane.glb",
         "PlaneRig",
         parent,
-        target_size=4.2,
+        target_size=5.4,
         location=(3.1, 0, 3.62),
         fit="span",
         center_location=True,
@@ -914,11 +953,6 @@ def select_hierarchy(root: bpy.types.Object) -> None:
 def look_at(obj: bpy.types.Object, target: tuple[float, float, float]) -> None:
     direction = Vector(target) - obj.location
     obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
-
-
-def output_name(scene_name: str) -> str:
-    revision = ASSET_REVISIONS.get(scene_name)
-    return f"{scene_name}-{revision}" if revision else scene_name
 
 
 def set_render(scene_name: str, camera_loc: tuple[float, float, float], target: tuple[float, float, float], accent: str) -> None:
@@ -966,7 +1000,7 @@ def set_render(scene_name: str, camera_loc: tuple[float, float, float], target: 
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "PNG"
     scene.render.film_transparent = False
-    scene.render.filepath = str(PREVIEW_DIR / f"{output_name(scene_name)}.png")
+    scene.render.filepath = str(PREVIEW_DIR / f"{scene_name}.png")
     scene.render.image_settings.color_mode = "RGBA"
     scene.render.image_settings.color_depth = "8"
     scene.view_settings.look = "AgX - Medium High Contrast"
@@ -974,7 +1008,7 @@ def set_render(scene_name: str, camera_loc: tuple[float, float, float], target: 
 
 def export_scene(scene_name: str, root: bpy.types.Object) -> None:
     source_path = SOURCE_DIR / f"{scene_name}.blend"
-    model_path = MODEL_DIR / f"{output_name(scene_name)}.glb"
+    model_path = MODEL_DIR / f"{scene_name}.glb"
     bpy.ops.wm.save_as_mainfile(filepath=str(source_path))
     bpy.ops.render.render(write_still=True)
     select_hierarchy(root)
@@ -988,7 +1022,7 @@ def export_scene(scene_name: str, root: bpy.types.Object) -> None:
         export_materials="EXPORT",
         export_image_format="AUTO",
     )
-    print(f"GENERATED {scene_name}: {model_path} and {PREVIEW_DIR / f'{output_name(scene_name)}.png'}")
+    print(f"GENERATED {scene_name}: {model_path} and {PREVIEW_DIR / f'{scene_name}.png'}")
 
 
 SCENES = [

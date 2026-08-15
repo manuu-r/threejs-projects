@@ -26,6 +26,7 @@ import {
   calculateCalibration,
   calculateDepthRatio,
   calculatePenetrationCorrection,
+  calculateReachMapping,
   calculateWholeHandVelocity,
   fuseForearmVelocity,
   CAMERA_FOCAL_X_NORMALIZED,
@@ -1316,7 +1317,7 @@ function createArena(
     0.05,
     70,
   );
-  camera.position.set(0.15, 3.15, 9.1);
+  camera.position.set(0.15, 3.15, 8);
   camera.lookAt(0, 2.8, 0);
 
   const hemi = new THREE.HemisphereLight(0x9bb6c8, 0x241514, 1.05);
@@ -1563,7 +1564,7 @@ function createArena(
 
   const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) });
   world.allowSleep = true;
-  if (world.solver instanceof CANNON.GSSolver) world.solver.iterations = 14;
+  if (world.solver instanceof CANNON.GSSolver) world.solver.iterations = 18;
   world.broadphase = new CANNON.SAPBroadphase(world);
   const bagPhysicsMaterial = new CANNON.Material("dense-leather-bag");
   const floorPhysicsMaterial = new CANNON.Material("rubber-floor");
@@ -1682,12 +1683,12 @@ function createArena(
     const chainLength = clamp(6.18 - y - bagHeight / 2, 0.62, 1.65);
     anchorPosition = new THREE.Vector3(x, y + bagHeight / 2 + chainLength, z);
     bagBody = new CANNON.Body({
-      mass: 42 * Math.pow(scale, 2.1),
+      mass: 42,
       material: bagPhysicsMaterial,
       shape: new CANNON.Cylinder(bagRadius, bagRadius * 0.92, bagHeight, 24),
       position: new CANNON.Vec3(x, y, z),
-      linearDamping: 0.24,
-      angularDamping: 0.39,
+      linearDamping: 0.17,
+      angularDamping: 0.29,
       allowSleep: true,
       sleepSpeedLimit: 0.08,
       sleepTimeLimit: 1.6,
@@ -2271,22 +2272,28 @@ function createArena(
   }
 
   function applyPunch(point: THREE.Vector3, velocity: THREE.Vector3, speed: number) {
-    const cappedSpeed = clamp(speed, 1.1, 9.5);
     const towardBag = new THREE.Vector3()
       .subVectors(
         new THREE.Vector3(bagBody.position.x, bagBody.position.y, bagBody.position.z),
         point,
       )
       .normalize();
+    const normalSpeed = Math.max(0, velocity.dot(towardBag));
+    const cappedSpeed = clamp(speed * 0.45 + normalSpeed * 0.85, 1.1, 10.5);
     const strikeDirection = velocity.clone().normalize();
     if (!Number.isFinite(strikeDirection.x)) strikeDirection.copy(towardBag);
-    strikeDirection.lerp(towardBag, 0.34).normalize();
-    const impulseMagnitude = cappedSpeed * 4.2;
+    strikeDirection.lerp(towardBag, 0.52).normalize();
+    const impulseMagnitude = clamp(cappedSpeed * 5.4, 6, 52);
     const impulse = strikeDirection.multiplyScalar(impulseMagnitude);
+    const relativeImpactPoint = new CANNON.Vec3(
+      point.x - bagBody.position.x,
+      point.y - bagBody.position.y,
+      point.z - bagBody.position.z,
+    );
     bagBody.wakeUp();
     bagBody.applyImpulse(
-      new CANNON.Vec3(impulse.x, impulse.y * 0.42, impulse.z),
-      new CANNON.Vec3(point.x, point.y, point.z),
+      new CANNON.Vec3(impulse.x, impulse.y * 0.28, impulse.z),
+      relativeImpactPoint,
     );
     const force = Math.round(clamp(cappedSpeed * 118 + impulseMagnitude * 21, 180, 1580));
     squash = clamp(cappedSpeed / 8.5, 0.18, 0.82);
@@ -2615,12 +2622,12 @@ function createArena(
       const verticalInside = Math.abs(localToBag.y) < bagHeight * 0.58;
       const fastEnough = speed > 0.98;
       const nearSurface = radialDistance < bagRadius + 0.12;
-      const crossedSurface = previous.distance >= bagRadius + 0.1;
+      const crossedSurface = previous.distance >= bagRadius + 0.075;
       const closingSpeed = velocity.dot(
         bagCenter.clone().sub(rawContact).normalize(),
       );
       const approaching = closingSpeed > 0.6;
-      const movingTowardCamera = depthRate > 0.34 && -velocity.z > 0.46;
+      const movingTowardCamera = depthRate > 0.28 && -velocity.z > 0.42;
       if (
         verticalInside &&
         fastEnough &&
@@ -2708,7 +2715,7 @@ function createArena(
     );
     camera.position.z = THREE.MathUtils.lerp(
       camera.position.z,
-      9.1 + bagBody.position.z * 0.16,
+      8 + bagBody.position.z * 0.14,
       0.025,
     );
     cameraTarget.lerp(
@@ -2761,10 +2768,12 @@ function createArena(
         2.78,
         3.28,
       );
-      const z = clamp((0.78 - cameraDistance) * 1.35, -0.78, 0.48);
+      const z = clamp(0.38 + (0.78 - cameraDistance) * 1.05, -0.28, 0.72);
       setupPhysics(scale, x, y, z);
-      const guardGap = clamp(cameraDistance * 0.48, 0.34, 0.52);
-      const expectedPunchTravel = clamp(cameraDistance * 0.3, 0.18, 0.32);
+      const { guardGap, punchGain } = calculateReachMapping(
+        cameraDistance,
+        bagRadius,
+      );
       calibratedHandFrame = {
         midpointX: calibration.midpointX,
         midpointY: calibration.midpointY,
@@ -2775,7 +2784,7 @@ function createArena(
         bagCenter: { x, y, z },
         bagRadius,
         guardGap,
-        punchGain: guardGap / expectedPunchTravel,
+        punchGain,
       };
       previousHands[0] = null;
       previousHands[1] = null;

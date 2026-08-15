@@ -115,4 +115,11 @@ test("keeps punching camera-only", async () => {
   assert.doesNotMatch(component, /const armConnections|FOREARMS DETECTED|Keep both elbows/);
   assert.match(styles, /\.arena-canvas\s*\{[^}]*pointer-events:\s*none;/s);
   assert.match(styles, /\.stats-rail\s*\{[^}]*transform:\s*scale\(1\.2\);/s);
+  assert.match(component, /mass:\s*42,/);
+  assert.match(component, /linearDamping:\s*0\.17/);
+  assert.match(component, /angularDamping:\s*0\.29/);
+  assert.match(component, /relativeImpactPoint/);
+  assert.match(component, /point\.x - bagBody\.position\.x/);
+  assert.match(styles, /\.camera-card\s*\{[^}]*width:\s*330px;/s);
+  assert.match(styles, /\.camera-viewport\s*\{[^}]*aspect-ratio:\s*16 \/ 9;/s);
 });
