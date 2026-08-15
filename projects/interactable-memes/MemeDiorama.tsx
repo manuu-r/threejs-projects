@@ -48,19 +48,19 @@ type SceneActors = {
 };
 
 const SCENE_URLS: Record<DioramaVariant, string> = {
-  crossfire: "/interactable-memes/studio-models/crossfire.glb",
+  crossfire: "/interactable-memes/studio-models/crossfire-v7.glb",
   scratch: "/interactable-memes/studio-models/scratch.glb",
-  reactor: "/interactable-memes/studio-models/reactor.glb",
+  reactor: "/interactable-memes/studio-models/reactor-v7.glb",
   brain: "/interactable-memes/studio-models/brain.glb",
-  demo: "/interactable-memes/studio-models/demo.glb",
+  demo: "/interactable-memes/studio-models/demo-v7.glb",
 };
 
 const POSTER_URLS: Record<DioramaVariant, string> = {
-  crossfire: "/interactable-memes/studio-previews/crossfire.png",
+  crossfire: "/interactable-memes/studio-previews/crossfire-v7.png",
   scratch: "/interactable-memes/studio-previews/scratch.png",
-  reactor: "/interactable-memes/studio-previews/reactor.png",
+  reactor: "/interactable-memes/studio-previews/reactor-v7.png",
   brain: "/interactable-memes/studio-previews/brain.png",
-  demo: "/interactable-memes/studio-previews/demo.png",
+  demo: "/interactable-memes/studio-previews/demo-v7.png",
 };
 
 const BACKGROUNDS: Record<DioramaVariant, number> = {
@@ -129,18 +129,24 @@ function collectActors(asset: THREE.Object3D): SceneActors {
   return actors;
 }
 
-function fitAsset(asset: THREE.Object3D, hero: boolean) {
+function fitAsset(asset: THREE.Object3D, hero: boolean, variant: DioramaVariant) {
   asset.updateMatrixWorld(true);
   const initial = new THREE.Box3().setFromObject(asset);
   const size = initial.getSize(new THREE.Vector3());
-  const targetWidth = hero ? 8.25 : 7.8;
-  const targetHeight = hero ? 5.15 : 4.95;
+  const targetWidth = variant === "demo" ? 4.2 : hero ? 8.25 : 7.8;
+  const targetHeight = variant === "demo" ? 3.9 : hero ? 5.15 : 4.95;
   const scale = Math.min(targetWidth / Math.max(size.x, 0.01), targetHeight / Math.max(size.y, 0.01));
   asset.scale.setScalar(scale);
   asset.updateMatrixWorld(true);
   const fitted = new THREE.Box3().setFromObject(asset);
   const center = fitted.getCenter(new THREE.Vector3());
-  asset.position.set(-center.x, -center.y - 0.05, -center.z);
+  if (variant === "demo") {
+    const pivot = asset.getObjectByName("ExcavatorUpper");
+    const pivotPosition = pivot?.getWorldPosition(new THREE.Vector3()) ?? center;
+    asset.position.set(-pivotPosition.x, -center.y - 0.12, -pivotPosition.z);
+  } else {
+    asset.position.set(-center.x, -center.y - 0.05, -center.z);
+  }
 }
 
 function disposeObject(root: THREE.Object3D) {
@@ -213,7 +219,8 @@ export function MemeDiorama({
     scene.background = new THREE.Color(background);
     scene.fog = new THREE.FogExp2(background, 0.055);
     const camera = new THREE.PerspectiveCamera(hero ? 34 : 38, 1, 0.1, 100);
-    camera.position.set(0, 0.1, hero ? 9.2 : 8.65);
+    const initialCameraDistance = variant === "demo" ? 10.25 : hero ? 9.2 : 8.65;
+    camera.position.set(0, 0.1, initialCameraDistance);
 
     scene.add(new THREE.HemisphereLight(0xfff4df, 0x10101a, 2.3));
     const key = new THREE.DirectionalLight(0xfff6e7, 5.5);
@@ -274,12 +281,12 @@ export function MemeDiorama({
           const surfaces = Array.isArray(object.material) ? object.material : [object.material];
           surfaces.forEach((surface) => {
             if (surface instanceof THREE.MeshStandardMaterial) {
-              surface.flatShading = true;
+              surface.flatShading = variant !== "crossfire";
               surface.needsUpdate = true;
             }
           });
         });
-        fitAsset(asset, hero);
+        fitAsset(asset, hero, variant);
         modelRoot.add(asset);
         actors = collectActors(asset);
         setLoadState({ status: "ready", progress: 100 });
@@ -298,7 +305,9 @@ export function MemeDiorama({
       const height = mount.clientHeight;
       renderer.setSize(width, height, false);
       camera.aspect = width / Math.max(height, 1);
-      camera.position.z = width < 560 ? (hero ? 10.8 : 10.1) : (hero ? 9.2 : 8.65);
+      camera.position.z = variant === "demo"
+        ? width < 560 ? 12.1 : 10.25
+        : width < 560 ? (hero ? 10.8 : 10.1) : (hero ? 9.2 : 8.65);
       camera.updateProjectionMatrix();
     }
 

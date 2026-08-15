@@ -25,6 +25,12 @@ SOURCE_DIR = REPO / "art" / "interactable-memes"
 LICENSED_MODEL_DIR = REPO / "public" / "interactable-memes" / "models"
 HAND_MODEL_DIR = REPO / "public" / "assets" / "hands"
 
+ASSET_REVISIONS = {
+    "crossfire": "v7",
+    "reactor": "v7",
+    "demo": "v7",
+}
+
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
 SOURCE_DIR.mkdir(parents=True, exist_ok=True)
@@ -394,6 +400,61 @@ def parent_keep_world(obj: bpy.types.Object, parent: bpy.types.Object) -> None:
     obj.matrix_world = world_matrix
 
 
+def baked_static_meshes(objects: list[bpy.types.Object], parent: bpy.types.Object) -> list[bpy.types.Object]:
+    """Freeze an evaluated character pose into ordinary meshes for reliable GLB playback."""
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    meshes = hierarchy_meshes(objects)
+    baked: list[bpy.types.Object] = []
+    for mesh_obj in meshes:
+        world_matrix = mesh_obj.matrix_world.copy()
+        evaluated = mesh_obj.evaluated_get(depsgraph)
+        baked_data = bpy.data.meshes.new_from_object(evaluated, preserve_all_data_layers=True, depsgraph=depsgraph)
+        mesh_obj.data = baked_data
+        mesh_obj.modifiers.clear()
+        mesh_obj.parent = parent
+        mesh_obj.matrix_world = world_matrix
+        for polygon in mesh_obj.data.polygons:
+            polygon.use_smooth = True
+        baked.append(mesh_obj)
+    for obj in list(objects):
+        if obj not in baked and obj.name in bpy.context.scene.objects:
+            bpy.data.objects.remove(obj, do_unlink=True)
+    bpy.context.view_layer.update()
+    return baked
+
+
+def compact_curled_fingers(meshes: list[bpy.types.Object]) -> None:
+    """Tuck the three inactive fingers into a compact fist instead of leaving loose arcs."""
+    finger_names = ("middle-finger", "ring-finger", "pinky-finger")
+    for mesh_obj in meshes:
+        compact_groups = {
+            group.index
+            for group in mesh_obj.vertex_groups
+            if any(name in group.name for name in finger_names) and "metacarpal" not in group.name
+        }
+        anchor_groups = {
+            group.index
+            for group in mesh_obj.vertex_groups
+            if any(name in group.name for name in finger_names) and "metacarpal" in group.name
+        }
+        anchor_vertices = [
+            vertex.co.copy()
+            for vertex in mesh_obj.data.vertices
+            if any(group.group in anchor_groups and group.weight > 0.2 for group in vertex.groups)
+        ]
+        if not compact_groups or not anchor_vertices:
+            continue
+        anchor = sum(anchor_vertices, Vector()) / len(anchor_vertices)
+        for vertex in mesh_obj.data.vertices:
+            weight = max(
+                (group.weight for group in vertex.groups if group.group in compact_groups),
+                default=0.0,
+            )
+            if weight > 0:
+                vertex.co = vertex.co.lerp(anchor, min(0.42, weight * 0.38))
+        mesh_obj.data.update()
+
+
 def pose_webxr_finger_gun(objects: list[bpy.types.Object]) -> None:
     rig = imported_armature(objects)
     if not rig:
@@ -401,9 +462,9 @@ def pose_webxr_finger_gun(objects: list[bpy.types.Object]) -> None:
     for finger in ("middle", "ring", "pinky"):
         for joint, curl in (
             ("metacarpal", 0.18),
-            ("phalanx-proximal", 1.5),
-            ("phalanx-intermediate", 1.72),
-            ("phalanx-distal", 1.32),
+            ("phalanx-proximal", 1.62),
+            ("phalanx-intermediate", 1.88),
+            ("phalanx-distal", 1.46),
         ):
             bone = rig.pose.bones.get(f"{finger}-finger-{joint}")
             if not bone:
@@ -435,14 +496,16 @@ def make_finger_gun(name: str, loc: tuple[float, float, float], side: int, paren
         HAND_MODEL_DIR / hand_file,
         name,
         parent,
-        target_size=2.05,
+        target_size=1.82,
         location=loc,
         fit="span",
-        rotation=(side * 0.16, -side * math.pi / 2, side * 0.08),
+        rotation=(side * 0.38, -side * math.pi / 2, side * 0.12),
         center_location=True,
     )
     pose_webxr_finger_gun(imported)
     recolor_imported_meshes(imported, skin)
+    baked = baked_static_meshes(imported, gun)
+    compact_curled_fingers(baked)
     sleeve_start = (loc[0] - side * 1.38, loc[1] + 0.12, loc[2] - 0.02)
     sleeve_end = (loc[0] - side * 0.58, loc[1] + 0.03, loc[2])
     segment(name + "_Sleeve", sleeve_start, sleeve_end, 0.3, sleeve, end_radius=0.22, parent=parent)
@@ -552,15 +615,48 @@ def build_scratch() -> bpy.types.Object:
 
 
 def make_gorilla(root: bpy.types.Object) -> bpy.types.Object:
-    gorilla, _ = import_glb_group(
+    gorilla, imported = import_glb_group(
         LICENSED_MODEL_DIR / "gorilla.glb",
         "Gorilla",
         root,
-        target_size=3.15,
-        location=(-1.55, 0.22, 0.24),
+        target_size=2.7,
+        location=(-1.55, 0.4, 0.22),
         fit="height",
-        rotation=(0, 0, 0.48),
+        rotation=(0, 0, 0.4),
     )
+
+    # Squat and hunch the stock knuckle-walking mesh into the meme's seated silhouette.
+    for mesh_obj in hierarchy_meshes(imported):
+        for vertex in mesh_obj.data.vertices:
+            z = vertex.co.z
+            if z < 2:
+                squat = min(1.0, max(0.0, (2 - z) / 82))
+                vertex.co.z += squat * 37
+                vertex.co.x *= 1 + squat * 0.22
+                vertex.co.y += squat * 8
+            elif z > 8:
+                hunch = min(1.0, (z - 8) / 72)
+                vertex.co.y -= hunch * 11
+                vertex.co.z -= hunch * 7
+        mesh_obj.data.update()
+    bpy.context.view_layer.update()
+    low, _ = world_bounds(imported)
+    world_matrix = gorilla.matrix_world.copy()
+    world_matrix.translation.z += 0.22 - low.z
+    gorilla.matrix_world = world_matrix
+
+    fur = material("Seated gorilla fur", "#292c27", roughness=0.84)
+    belly = material("Seated gorilla belly", "#393b34", roughness=0.82)
+    skin = material("Seated gorilla hands", "#31322d", roughness=0.78)
+    ico("GorillaBelly", (-1.55, -0.18, 1.12), (0.69, 0.52, 0.78), belly, subdivisions=2, parent=root)
+    for side in (-1, 1):
+        hip_x = -1.55 + side * 0.55
+        knee_x = -1.55 + side * 0.83
+        ico(f"GorillaHaunch_{side}", (hip_x, 0.08, 0.62), (0.56, 0.55, 0.52), fur, subdivisions=2, parent=root)
+        segment(f"GorillaThigh_{side}", (hip_x, -0.02, 0.72), (knee_x, -0.62, 0.46), 0.28, fur, end_radius=0.24, parent=root)
+        ico(f"GorillaFoot_{side}", (knee_x, -0.9, 0.3), (0.38, 0.48, 0.22), skin, subdivisions=2, parent=root)
+        segment(f"GorillaRestingArm_{side}", (-1.55 + side * 0.44, -0.02, 1.62), (knee_x, -0.68, 0.78), 0.18, fur, end_radius=0.14, parent=root)
+        ico(f"GorillaRestingHand_{side}", (knee_x, -0.7, 0.7), (0.28, 0.24, 0.18), skin, subdivisions=2, parent=root)
     return gorilla
 
 
@@ -820,6 +916,11 @@ def look_at(obj: bpy.types.Object, target: tuple[float, float, float]) -> None:
     obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 
 
+def output_name(scene_name: str) -> str:
+    revision = ASSET_REVISIONS.get(scene_name)
+    return f"{scene_name}-{revision}" if revision else scene_name
+
+
 def set_render(scene_name: str, camera_loc: tuple[float, float, float], target: tuple[float, float, float], accent: str) -> None:
     world = bpy.context.scene.world or bpy.data.worlds.new("Studio World")
     bpy.context.scene.world = world
@@ -865,7 +966,7 @@ def set_render(scene_name: str, camera_loc: tuple[float, float, float], target: 
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "PNG"
     scene.render.film_transparent = False
-    scene.render.filepath = str(PREVIEW_DIR / f"{scene_name}.png")
+    scene.render.filepath = str(PREVIEW_DIR / f"{output_name(scene_name)}.png")
     scene.render.image_settings.color_mode = "RGBA"
     scene.render.image_settings.color_depth = "8"
     scene.view_settings.look = "AgX - Medium High Contrast"
@@ -873,7 +974,7 @@ def set_render(scene_name: str, camera_loc: tuple[float, float, float], target: 
 
 def export_scene(scene_name: str, root: bpy.types.Object) -> None:
     source_path = SOURCE_DIR / f"{scene_name}.blend"
-    model_path = MODEL_DIR / f"{scene_name}.glb"
+    model_path = MODEL_DIR / f"{output_name(scene_name)}.glb"
     bpy.ops.wm.save_as_mainfile(filepath=str(source_path))
     bpy.ops.render.render(write_still=True)
     select_hierarchy(root)
@@ -887,7 +988,7 @@ def export_scene(scene_name: str, root: bpy.types.Object) -> None:
         export_materials="EXPORT",
         export_image_format="AUTO",
     )
-    print(f"GENERATED {scene_name}: {model_path} and {PREVIEW_DIR / f'{scene_name}.png'}")
+    print(f"GENERATED {scene_name}: {model_path} and {PREVIEW_DIR / f'{output_name(scene_name)}.png'}")
 
 
 SCENES = [

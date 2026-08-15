@@ -72,9 +72,17 @@ test("ships the five Blender-authored dioramas and their rendered loading poster
   const modelDirectory = new URL("../public/interactable-memes/studio-models/", import.meta.url);
   const previewDirectory = new URL("../public/interactable-memes/studio-previews/", import.meta.url);
 
-  for (const scene of ["crossfire", "scratch", "reactor", "brain", "demo"]) {
-    const model = new URL(`${scene}.glb`, modelDirectory);
-    const preview = new URL(`${scene}.png`, previewDirectory);
+  const files = {
+    crossfire: "crossfire-v7",
+    scratch: "scratch",
+    reactor: "reactor-v7",
+    brain: "brain",
+    demo: "demo-v7",
+  };
+
+  for (const [scene, filename] of Object.entries(files)) {
+    const model = new URL(`${filename}.glb`, modelDirectory);
+    const preview = new URL(`${filename}.png`, previewDirectory);
     assert.equal(existsSync(model), true, `${scene}.glb is missing`);
     assert.equal(existsSync(preview), true, `${scene}.png is missing`);
     assert.ok(statSync(model).size > 10_000, `${scene}.glb is unexpectedly small`);
@@ -84,13 +92,15 @@ test("ships the five Blender-authored dioramas and their rendered loading poster
 
 test("uses the production meshes and keeps the gorilla scene core-free", () => {
   const directory = new URL("../public/interactable-memes/studio-models/", import.meta.url);
-  const crossfire = readFileSync(new URL("crossfire.glb", directory)).toString("latin1");
-  const reactor = readFileSync(new URL("reactor.glb", directory)).toString("latin1");
-  const demo = readFileSync(new URL("demo.glb", directory)).toString("latin1");
+  const crossfire = readFileSync(new URL("crossfire-v7.glb", directory)).toString("latin1");
+  const reactor = readFileSync(new URL("reactor-v7.glb", directory)).toString("latin1");
+  const demo = readFileSync(new URL("demo-v7.glb", directory)).toString("latin1");
 
   assert.match(crossfire, /Suit_Body/);
   assert.match(crossfire, /handMeshNode/);
+  assert.doesNotMatch(crossfire, /middle-finger-phalanx/);
   assert.match(reactor, /Geo_Gorilla/);
+  assert.match(reactor, /GorillaBelly/);
   assert.match(reactor, /TrexStareEye/);
   assert.doesNotMatch(reactor, /ReactorCore|CoreCrystal|CoreRing/);
   assert.match(demo, /Fuselage_Cube/);
