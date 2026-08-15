@@ -37,7 +37,23 @@ img { display: block; max-width: 100%; }
 .chapter-nav { display: flex; gap: 4px; }
 .chapter-nav a { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid rgba(240,237,228,.25); border-radius: 50%; transition: 160ms ease; }
 .chapter-nav a:hover, .chapter-nav a:focus-visible { border-color: var(--acid); outline: 0; background: var(--acid); color: var(--ink); transform: rotate(8deg); }
-.reset-button { justify-self: end; padding: 0 0 4px; border: 0; border-bottom: 1px solid currentColor; background: none; color: inherit; font-size: 10px; font-weight: 900; letter-spacing: .1em; cursor: pointer; }
+.topbar-actions { justify-self: end; display: flex; align-items: center; gap: 17px; }
+.x-follow-button { position: relative; min-height: 43px; display: inline-flex; align-items: center; gap: 9px; overflow: hidden; padding: 5px 10px 5px 6px; border: 1px solid rgba(216,255,56,.72); border-radius: 999px; background: rgba(216,255,56,.08); box-shadow: 0 0 0 1px rgba(216,255,56,.08), 0 0 24px rgba(216,255,56,.12); isolation: isolate; transition: transform 170ms ease, background-color 170ms ease, box-shadow 170ms ease; }
+.x-follow-button::before { content: ""; position: absolute; z-index: -1; inset: -70% auto -70% -35%; width: 34%; transform: rotate(18deg); background: linear-gradient(90deg, transparent, rgba(255,255,255,.42), transparent); animation: follow-scan 3.6s ease-in-out infinite; }
+.x-follow-button::after { content: "LOOK"; position: absolute; top: -3px; right: 14px; padding: 2px 4px; transform: rotate(3deg); background: var(--orange); color: white; font: 900 6px/1 "Courier New", monospace; letter-spacing: .12em; box-shadow: 2px 2px 0 #000; animation: follow-tag 1.7s ease-in-out infinite; }
+.x-follow-button:hover, .x-follow-button:focus-visible { outline: 0; transform: translateY(-2px) rotate(-1deg); background: var(--acid); color: var(--ink); box-shadow: 0 5px 0 #000, 0 0 32px rgba(216,255,56,.45); }
+.x-follow-signal { position: relative; flex: 0 0 auto; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: var(--acid); color: var(--ink); font: 900 15px/1 Arial, Helvetica, sans-serif; box-shadow: 0 0 16px rgba(216,255,56,.34); }
+.x-follow-signal::after { content: ""; position: absolute; inset: -4px; border: 1px solid var(--acid); border-radius: inherit; animation: follow-radar 1.9s ease-out infinite; }
+.x-follow-signal b { font-weight: 900; }
+.x-follow-copy { display: grid; gap: 3px; line-height: 1; }
+.x-follow-copy small { color: rgba(240,237,228,.52); font: 800 6px/1 "Courier New", monospace; letter-spacing: .12em; }
+.x-follow-copy strong { font-size: 8px; letter-spacing: .08em; white-space: nowrap; }
+.x-follow-copy em { color: var(--acid); font-style: normal; }
+.x-follow-button:hover .x-follow-copy small, .x-follow-button:focus-visible .x-follow-copy small { color: rgba(17,17,15,.58); }
+.x-follow-button:hover .x-follow-copy em, .x-follow-button:focus-visible .x-follow-copy em { color: var(--ink); }
+.x-follow-arrow { color: var(--acid); font-size: 13px; }
+.x-follow-button:hover .x-follow-arrow, .x-follow-button:focus-visible .x-follow-arrow { color: var(--ink); transform: translate(1px,-1px); }
+.reset-button { padding: 0 0 4px; border: 0; border-bottom: 1px solid currentColor; background: none; color: inherit; font-size: 10px; font-weight: 900; letter-spacing: .1em; cursor: pointer; }
 
 .hero { position: relative; min-height: 100svh; overflow: hidden; padding-top: 74px; background: #080808; color: var(--paper); }
 .hero-art { z-index: 0; object-fit: cover; object-position: center; filter: saturate(1.05) contrast(1.04); }
@@ -180,6 +196,9 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
 .back-to-top { display: inline-block; margin-top: 52px; padding-bottom: 5px; border-bottom: 1px solid currentColor; font-size: 10px; font-weight: 900; letter-spacing: .1em; }
 
 @keyframes live-pulse { 50% { opacity: .3; } }
+@keyframes follow-scan { 0%, 52% { left: -42%; } 78%, 100% { left: 122%; } }
+@keyframes follow-radar { 0% { opacity: .75; transform: scale(.82); } 76%, 100% { opacity: 0; transform: scale(1.42); } }
+@keyframes follow-tag { 0%, 100% { transform: translateY(0) rotate(3deg); } 50% { transform: translateY(-2px) rotate(-2deg); } }
 
 @media (max-width: 1000px) {
   .hero-copy { width: auto; }
@@ -191,10 +210,16 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
 
 @media (max-width: 700px) {
   html { scroll-padding-top: 62px; }
-  .topbar { height: 62px; grid-template-columns: 1fr auto; padding: 0 18px; }
+  .topbar { height: 62px; grid-template-columns: 1fr auto; padding: 0 12px; }
   .chapter-nav { display: none; }
   .brand-mark { width: 32px; height: 32px; }
   .brand > span:last-child { display: none; }
+  .topbar-actions { gap: 9px; }
+  .x-follow-button { min-height: 38px; gap: 6px; padding: 4px 8px 4px 5px; }
+  .x-follow-signal { width: 28px; height: 28px; }
+  .x-follow-copy small, .x-follow-copy em, .x-follow-arrow { display: none; }
+  .x-follow-copy strong { font-size: 8px; }
+  .x-follow-button::after { right: 6px; }
   .reset-button { font-size: 9px; }
   .hero { min-height: 900px; padding-top: 62px; }
   .hero-art { object-position: 67% center; }

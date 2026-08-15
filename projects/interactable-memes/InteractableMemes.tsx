@@ -74,7 +74,20 @@ export default function InteractableMemes() {
         <nav className="chapter-nav" aria-label="Meme machines">
           <a href="#standoff">01</a><a href="#scratch">02</a><a href="#reactor">03</a><a href="#brain">04</a><a href="#demo">05</a>
         </nav>
-        <button className="reset-button" type="button" onClick={resetAll}>RESET THE LAB ↻</button>
+        <div className="topbar-actions">
+          <a
+            className="x-follow-button"
+            href="https://x.com/manudotdev?ref_src=twsrc%5Etfw"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Follow @manudotdev on X for more interactive experiments"
+          >
+            <span className="x-follow-signal" aria-hidden="true"><b>𝕏</b></span>
+            <span className="x-follow-copy"><small>MORE INTERNET NONSENSE</small><strong>FOLLOW <em>@MANUDOTDEV</em></strong></span>
+            <span className="x-follow-arrow" aria-hidden="true">↗</span>
+          </a>
+          <button className="reset-button" type="button" onClick={resetAll}>RESET THE LAB ↻</button>
+        </div>
       </header>
 
       <section className="hero" id="top">

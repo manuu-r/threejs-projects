@@ -33,6 +33,10 @@ test("server-renders the interactable memes experience", async () => {
   assert.match(html, /THE MEME\./);
   assert.match(html, /THEN THE WORLD\./);
   assert.match(html, /RESET THE LAB/);
+  assert.match(html, /FOLLOW/);
+  assert.match(html, /MORE INTERNET NONSENSE/);
+  assert.match(html, /https:\/\/x\.com\/manudotdev\?ref_src=twsrc%5Etfw/);
+  assert.match(html, /Follow @manudotdev on X for more interactive experiments/);
   assert.match(html, /The original joke, now with polygons/);
   assert.match(html, /UNIVERSAL NOD PROTOCOL/);
   assert.match(html, /VINYL PURR-SUASION/);
