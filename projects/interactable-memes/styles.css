@@ -88,6 +88,7 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
 .stack-card-two { z-index: 3; transform: rotate(-6deg) translate(-13%, 0); }
 .stack-card-three { z-index: 2; transform: rotate(9deg) translate(9%, -1%); }
 .stack-card-four { z-index: 1; transform: rotate(-12deg) translate(-6%, 1%); }
+.stack-card-five { z-index: 0; transform: rotate(14deg) translate(8%, 2%); }
 .stack-card:hover, .stack-card:focus-visible { z-index: 10; outline: 3px solid var(--acid); transform: rotate(0) translate(-10%, -2%) scale(1.03); }
 .hero-footer { position: absolute; z-index: 5; bottom: 20px; left: 28px; right: 28px; display: flex; justify-content: space-between; color: rgba(240,237,228,.55); font: 700 9px/1 "Courier New", monospace; letter-spacing: .1em; }
 
@@ -103,6 +104,34 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
 .image-button { position: relative; width: 100%; display: block; overflow: hidden; padding: 0; border: 0; background: #222; cursor: crosshair; }
 .image-button > img { width: 100%; height: auto; pointer-events: none; user-select: none; }
 .machine-tip { min-height: 42px; display: flex; align-items: center; margin: 0; padding: 0 13px; border-top: 1px solid currentColor; font: 700 9px/1.3 "Courier New", monospace; letter-spacing: .06em; }
+
+.diorama-stage {
+  position: relative;
+  width: 100%;
+  min-height: clamp(390px, 46vw, 620px);
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 52% 42%, rgba(255,255,255,.88), rgba(255,255,255,.2) 48%, transparent 72%),
+    repeating-linear-gradient(90deg, transparent 0 calc(20% - 1px), rgba(17,17,15,.055) calc(20% - 1px) 20%),
+    #d8d3c8;
+  isolation: isolate;
+}
+.diorama-stage::before {
+  content: "3D";
+  position: absolute;
+  z-index: -1;
+  right: -1%;
+  bottom: -8%;
+  color: rgba(17,17,15,.055);
+  font: 1000 clamp(120px, 18vw, 280px)/.75 Arial, sans-serif;
+  letter-spacing: -.12em;
+}
+.diorama-canvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; outline: none; }
+.diorama-canvas:active { cursor: grabbing; }
+.diorama-canvas:focus-visible { box-shadow: inset 0 0 0 4px var(--acid); }
+.diorama-hint { position: absolute; z-index: 5; left: 12px; bottom: 12px; padding: 8px 10px; border: 1px solid rgba(17,17,15,.62); border-radius: 999px; background: rgba(240,237,228,.82); color: var(--ink); backdrop-filter: blur(8px); font: 900 8px/1 "Courier New", monospace; letter-spacing: .07em; pointer-events: none; }
+.diorama-stage > img { width: 100%; height: 100%; object-fit: contain; }
+.diorama-fallback { position: absolute; inset: 0; }
 
 .room-standoff { background: var(--acid); }
 .room-standoff .room-copy h2 em { color: #674aff; }
@@ -182,6 +211,16 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
 .approval-stamp { position: absolute; right: 4%; bottom: 6%; padding: 9px; border: 4px double #ef334e; color: #ef334e; font: 1000 clamp(15px, 3vw, 36px)/.82 Impact, sans-serif; text-align: center; transform: rotate(-9deg) scale(2); opacity: 0; }
 .dose-2 .approval-stamp, .dose-3 .approval-stamp { animation: stamp-in 440ms cubic-bezier(.15,.9,.2,1) forwards; }
 
+.room-demo { background: #ffdc3d; }
+.room-demo .room-copy h2 em { color: #6947ff; }
+.demo-trigger { width: min(345px, 100%); min-height: 58px; display: flex; align-items: center; justify-content: space-between; margin-top: 38px; padding: 0 9px 0 17px; border: 2px solid var(--ink); background: #6947ff; color: white; font-size: 10px; font-weight: 900; letter-spacing: .08em; cursor: pointer; box-shadow: 7px 7px 0 var(--ink); transition: transform 140ms, box-shadow 140ms; }
+.demo-trigger:active { transform: translate(5px, 5px); box-shadow: 2px 2px 0 var(--ink); }
+.demo-trigger span { display: grid; width: 39px; height: 39px; place-items: center; border-radius: 50%; background: var(--acid); color: var(--ink); font-size: 20px; }
+.demo-status { min-height: 42px; margin: 20px 0 0; padding-left: 12px; border-left: 3px solid #6947ff; font: 800 12px/1.5 "Courier New", monospace; }
+.machine-demo { transform: rotate(1deg); }
+.machine-demo .machine-label span:last-child { color: #6947ff; }
+.machine-demo .diorama-stage { background: radial-gradient(circle at 50% 45%, #d7efff, #8ec4e8 55%, #6e9fbe); }
+
 .manifesto { min-height: 82svh; padding: clamp(90px, 11vw, 160px) clamp(24px, 6vw, 92px); background: var(--ink); color: var(--paper); }
 .manifesto-index { margin: 0 0 62px; color: var(--acid); font: 700 11px/1 "Courier New", monospace; letter-spacing: .1em; }
 .manifesto h2 { max-width: 1180px; margin: 0; font-size: clamp(43px, 6.2vw, 98px); letter-spacing: -.06em; line-height: .94; }
@@ -232,6 +271,7 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
   .room-copy h2 { font-size: clamp(50px, 15vw, 76px); }
   .meme-room { gap: 46px; padding-inline: 18px; }
   .machine { box-shadow: 9px 9px 0 currentColor; }
+  .diorama-stage { min-height: 360px; }
   .machine-label { min-height: 36px; font-size: 7px; }
   .machine-tip { min-height: 38px; font-size: 7px; }
   .dj-controls { flex-direction: column; }

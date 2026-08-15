@@ -1,15 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import {
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
-
-type Shot = { id: number; x: number; y: number; glyph: string };
+import { useState } from "react";
+import { MemeDiorama } from "./MemeDiorama";
 
 const levels = ["DORMANT", "SUSPICIOUS", "GLOWING", "DINOSAUR"];
 const reactions = [
@@ -18,77 +11,30 @@ const reactions = [
   "BRAIN: You son of a bitch, I’m in.",
   "BRAIN: We have learned absolutely nothing.",
 ];
+const demoStates = [
+  "PRODUCT STATUS: NOT READY",
+  "ADDING VERY CONVINCING FAKE DATA…",
+  "MOVING THE BUGS OFFSCREEN…",
+  "RENAMING ‘BROKEN’ TO ‘BETA’…",
+  "DEMO READY-ISH. DO NOT REFRESH.",
+];
 
 export default function InteractableMemes() {
-  const [shots, setShots] = useState<Shot[]>([]);
   const [shotCount, setShotCount] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
-  const [isScratching, setIsScratching] = useState(false);
-  const [recordRotation, setRecordRotation] = useState(0);
   const [bpm, setBpm] = useState(118);
   const [reactorLevel, setReactorLevel] = useState(0);
   const [pillDoses, setPillDoses] = useState(0);
-  const shotId = useRef(0);
-  const scratchX = useRef(0);
-  const timers = useRef<number[]>([]);
-
-  useEffect(() => () => timers.current.forEach(window.clearTimeout), []);
-
-  function fireFingerGun(event?: ReactPointerEvent<HTMLButtonElement>) {
-    const rect = event?.currentTarget.getBoundingClientRect();
-    const x = event && rect ? ((event.clientX - rect.left) / rect.width) * 100 : 50;
-    const y = event && rect ? ((event.clientY - rect.top) / rect.height) * 100 : 48;
-    const id = shotId.current++;
-
-    setShots((current) => [...current.slice(-7), { id, x, y, glyph: id % 3 === 0 ? "POW!" : "PEW!" }]);
-    setShotCount((count) => count + 1);
-    timers.current.push(
-      window.setTimeout(() => setShots((current) => current.filter((shot) => shot.id !== id)), 720),
-    );
-  }
-
-  function aimFingerGun(event: ReactPointerEvent<HTMLButtonElement>) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    event.currentTarget.style.setProperty("--aim-x", `${event.clientX - rect.left}px`);
-    event.currentTarget.style.setProperty("--aim-y", `${event.clientY - rect.top}px`);
-  }
-
-  function startScratch(event: ReactPointerEvent<HTMLButtonElement>) {
-    setIsScratching(true);
-    setIsPlaying(false);
-    scratchX.current = event.clientX;
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-
-  function scratch(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (!isScratching) return;
-    const delta = event.clientX - scratchX.current;
-    scratchX.current = event.clientX;
-    setRecordRotation((rotation) => rotation + delta * 1.8);
-  }
-
-  function stopScratch(event: ReactPointerEvent<HTMLButtonElement>) {
-    setIsScratching(false);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }
+  const [demoLevel, setDemoLevel] = useState(0);
 
   function resetAll() {
-    setShots([]);
     setShotCount(0);
     setIsPlaying(true);
-    setIsScratching(false);
-    setRecordRotation(0);
     setBpm(118);
     setReactorLevel(0);
     setPillDoses(0);
+    setDemoLevel(0);
   }
-
-  const discStyle = {
-    "--record-turn": `${recordRotation}deg`,
-    "--spin-speed": `${Math.max(0.45, 9 - bpm / 17)}s`,
-  } as CSSProperties;
 
   return (
     <main>
@@ -102,25 +48,26 @@ export default function InteractableMemes() {
           <a href="#scratch">02</a>
           <a href="#reactor">03</a>
           <a href="#brain">04</a>
+          <a href="#demo">05</a>
         </nav>
-        <button className="reset-button" type="button" onClick={resetAll}>REMIX MEME ↻</button>
+        <button className="reset-button" type="button" onClick={resetAll}>RESET THE LAB ↻</button>
       </header>
 
       <section className="hero" id="top">
         <div className="hero-noise" aria-hidden="true" />
         <div className="hero-copy">
-          <p className="eyebrow"><span>LIVE</span> A tiny experiment in serious nonsense</p>
-          <h1>MEMES YOU<br /><em>CAN TOUCH.</em></h1>
+          <p className="eyebrow"><span>LIVE 3D</span> Five experiments in serious nonsense</p>
+          <h1>MEMES YOU<br /><em>CAN ORBIT.</em></h1>
           <p className="intro">
-            Four familiar images. Four unnecessary control panels. Point, scratch,
-            activate, and medicate your way through the internet’s finest logic.
+            Five flat internet artifacts rebuilt as tiny Three.js dioramas—with
+            depth, props, wobble, dramatic lighting, and inadvisable controls.
           </p>
-          <a className="enter-button" href="#standoff">ENTER THE LAB <span>↓</span></a>
+          <a className="enter-button" href="#standoff">ENTER THE 3D LAB <span>↓</span></a>
         </div>
 
-        <div className="hero-stack" aria-label="Four interactive meme previews">
+        <div className="hero-stack" aria-label="Five interactive 3D meme previews">
           <a className="stack-card stack-card-one" href="#standoff">
-            <Image src="/interactable-memes/source/finger-guns.png" alt="Office finger-gun standoff" width={708} height={534} />
+            <Image src="/interactable-memes/source/finger-guns.png" alt="Office finger-gun standoff" width={708} height={534} priority />
             <span>01 / CROSSFIRE</span>
           </a>
           <a className="stack-card stack-card-two" href="#scratch">
@@ -135,168 +82,158 @@ export default function InteractableMemes() {
             <Image src="/interactable-memes/source/brain-pill.png" alt="Morty agrees to take a pill meme" width={500} height={488} />
             <span>04 / BRAIN</span>
           </a>
+          <a className="stack-card stack-card-five" href="#demo">
+            <Image src="/interactable-memes/source/client-demo.png" alt="Excavator holding up an airplane" width={1453} height={1094} />
+            <span>05 / CLIENT DEMO</span>
+          </a>
         </div>
 
         <div className="hero-footer" aria-hidden="true">
-          <span>SCROLL TO ACTIVATE</span><span>NO MEMES WERE IMPROVED IN THIS PROCESS</span>
+          <span>DRAG EVERY SCENE TO ORBIT</span><span>REAL DEPTH · FAKE PHYSICS · FIVE BAD IDEAS</span>
         </div>
       </section>
 
       <section className="meme-room room-standoff" id="standoff">
         <div className="room-copy">
-          <p className="room-index">01 / OFFICE CROSSFIRE</p>
-          <h2>Finger guns.<br /><em>Real stakes.</em></h2>
-          <p>Move your cursor to aim. Tap anywhere in the frame to return fire.</p>
+          <p className="room-index">01 / 3D OFFICE CROSSFIRE</p>
+          <h2>Finger guns.<br /><em>Real depth.</em></h2>
+          <p>Drag the entire standoff through space. Tap the scene to return fire and recoil every 3D hand.</p>
           <div className="scoreboard" aria-live="polite">
             <span>SHOTS FIRED</span><strong>{String(shotCount).padStart(2, "0")}</strong>
           </div>
         </div>
         <div className="machine machine-standoff">
-          <div className="machine-label"><span>GESTURE RECOGNITION: EXTREMELY MANUAL</span><span>ARMED</span></div>
-          <button
-            className="image-button standoff-stage"
-            type="button"
-            aria-label="Aim and fire a finger gun"
-            onPointerMove={aimFingerGun}
-            onPointerDown={fireFingerGun}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                fireFingerGun();
-              }
-            }}
-          >
-            <Image src="/interactable-memes/source/finger-guns.png" alt="Michael Scott surrounded by finger guns" width={708} height={534} />
-            <span className="crosshair" aria-hidden="true" />
-            {shots.map((shot) => (
-              <span
-                className="shot-burst"
-                key={shot.id}
-                style={{ left: `${shot.x}%`, top: `${shot.y}%` }}
-                aria-hidden="true"
-              >{shot.glyph}</span>
-            ))}
-          </button>
-          <p className="machine-tip">TIP / TAP FAST FOR MAXIMUM CORPORATE TENSION</p>
+          <div className="machine-label"><span>THREE.JS GESTURE RECONSTRUCTION</span><span>ARMED</span></div>
+          <MemeDiorama
+            src="/interactable-memes/source/finger-guns.png"
+            imageWidth={708}
+            imageHeight={534}
+            variant="crossfire"
+            accent="#d8ff38"
+            motion={shotCount}
+            ariaLabel="3D finger-gun standoff. Drag to orbit and tap to fire."
+            onAction={() => setShotCount((count) => count + 1)}
+          />
+          <p className="machine-tip">3D ACTION / ORBIT, AIM, FIRE, QUESTION MANAGEMENT</p>
         </div>
       </section>
 
       <section className="meme-room room-scratch" id="scratch">
         <div className="room-copy">
-          <p className="room-index">02 / VINYL PURR-SUASION</p>
+          <p className="room-index">02 / 3D VINYL PURR-SUASION</p>
           <h2>Scratch the<br /><em>cat-alogue.</em></h2>
-          <p>Drag the record back and forth, or let DJ Whiskers run the booth.</p>
+          <p>Orbit the booth, spin the floating record, and make the 3D equalizer work much harder than the DJ.</p>
           <div className="dj-controls">
             <button type="button" onClick={() => setIsPlaying((playing) => !playing)}>
               {isPlaying ? "PAUSE SET Ⅱ" : "PLAY SET ▶"}
             </button>
             <label>
               <span>BPM <b>{bpm}</b></span>
-              <input
-                type="range"
-                min="72"
-                max="180"
-                value={bpm}
-                onChange={(event) => setBpm(Number(event.target.value))}
-                aria-label="DJ set tempo"
-              />
+              <input type="range" min="72" max="180" value={bpm} onChange={(event) => setBpm(Number(event.target.value))} aria-label="DJ set tempo" />
             </label>
           </div>
         </div>
-        <div className={`machine machine-scratch${isPlaying ? " is-playing" : ""}${isScratching ? " is-scratching" : ""}`}>
-          <div className="machine-label"><span>FELINE FREQUENCY MODULATOR</span><span>{isScratching ? "SCRATCH!" : `${bpm} BPM`}</span></div>
-          <div className="dj-stage">
-            <Image src="/interactable-memes/source/dj-cat.png" alt="Cat DJ raising one paw over a turntable" width={744} height={402} />
-            <div className="equalizer" aria-hidden="true">{Array.from({ length: 12 }, (_, index) => <i key={index} />)}</div>
-            <div className="record-spinner" style={discStyle}>
-              <button
-                className="scratch-disc"
-                type="button"
-                aria-label="Drag to scratch the record"
-                onPointerDown={startScratch}
-                onPointerMove={scratch}
-                onPointerUp={stopScratch}
-                onPointerCancel={stopScratch}
-                onKeyDown={(event) => {
-                  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-                    event.preventDefault();
-                    setIsPlaying(false);
-                    setRecordRotation((rotation) => rotation + (event.key === "ArrowLeft" ? -24 : 24));
-                  }
-                  if (event.key === " ") {
-                    event.preventDefault();
-                    setIsPlaying((playing) => !playing);
-                  }
-                }}
-              ><span>DRAG<br />ME</span></button>
-            </div>
-          </div>
-          <p className="machine-tip">TIP / THE CAT ACCEPTS REQUESTS, THEN IGNORES THEM</p>
+        <div className="machine machine-scratch">
+          <div className="machine-label"><span>FELINE FREQUENCY MODULATOR / WEBGL</span><span>{isPlaying ? `${bpm} BPM` : "PAUSED"}</span></div>
+          <MemeDiorama
+            src="/interactable-memes/source/dj-cat.png"
+            imageWidth={744}
+            imageHeight={402}
+            variant="scratch"
+            accent="#d8ff38"
+            motion={isPlaying ? 1 : 0}
+            speed={bpm}
+            ariaLabel="3D cat DJ booth. Drag to orbit and scratch; tap to play or pause."
+            onAction={() => setIsPlaying((playing) => !playing)}
+            onDragStart={() => setIsPlaying(false)}
+          />
+          <p className="machine-tip">3D ACTION / DRAG THE DECK · TAP TO DROP THE BEAT</p>
         </div>
       </section>
 
       <section className="meme-room room-reactor" id="reactor">
         <div className="room-copy">
-          <p className="room-index">03 / EFFORT REACTOR</p>
+          <p className="room-index">03 / 3D EFFORT REACTOR</p>
           <h2>Try your<br /><em>absolute best.</em></h2>
-          <p>Increase the effort level. Scientific accuracy stops at “radioactive dinosaur.”</p>
-          <button
-            className="reactor-trigger"
-            type="button"
-            onClick={() => setReactorLevel((level) => (level + 1) % levels.length)}
-          >PUSH FOR MORE EFFORT <span>＋</span></button>
+          <p>Raise the reactor power and inspect the radioactive meme core from angles nature never intended.</p>
+          <button className="reactor-trigger" type="button" onClick={() => setReactorLevel((level) => (level + 1) % levels.length)}>
+            PUSH FOR MORE EFFORT <span>＋</span>
+          </button>
         </div>
         <div className={`machine machine-reactor reactor-level-${reactorLevel}`}>
-          <div className="machine-label"><span>UNLICENSED MOTIVATION CHAMBER</span><span>{levels[reactorLevel]}</span></div>
-          <button
-            className="image-button reactor-stage"
-            type="button"
-            aria-label={`Effort level ${reactorLevel + 1} of ${levels.length}: ${levels[reactorLevel]}. Activate next level.`}
-            onClick={() => setReactorLevel((level) => (level + 1) % levels.length)}
-          >
-            <Image src="/interactable-memes/source/radioactive-dinosaur.png" alt="Gorilla promises to fight a radioactive dinosaur" width={720} height={463} />
-            <span className="reactor-glow" aria-hidden="true" />
-            <span className="hazard-symbol" aria-hidden="true">☢</span>
-            <span className="reactor-readout" aria-hidden="true">
-              {levels.map((level, index) => <i className={index <= reactorLevel ? "active" : ""} key={level} />)}
-            </span>
-          </button>
-          <p className="machine-tip">CURRENT THREAT / {levels[reactorLevel]} · CLICK IMAGE TO ESCALATE</p>
+          <div className="machine-label"><span>UNLICENSED 3D MOTIVATION CHAMBER</span><span>{levels[reactorLevel]}</span></div>
+          <MemeDiorama
+            src="/interactable-memes/source/radioactive-dinosaur.png"
+            imageWidth={720}
+            imageHeight={463}
+            variant="reactor"
+            accent="#d8ff38"
+            motion={reactorLevel}
+            ariaLabel={`3D radioactive dinosaur reactor at ${levels[reactorLevel]} level. Drag to orbit and tap to escalate.`}
+            onAction={() => setReactorLevel((level) => (level + 1) % levels.length)}
+          />
+          <p className="machine-tip">CORE STATUS / {levels[reactorLevel]} · TAP TO ESCALATE</p>
         </div>
       </section>
 
       <section className="meme-room room-brain" id="brain">
         <div className="room-copy">
-          <p className="room-index">04 / PLACEBO PROTOCOL</p>
+          <p className="room-index">04 / 3D PLACEBO PROTOCOL</p>
           <h2>Ask brain.<br /><em>Ignore brain.</em></h2>
-          <p>Take another zero-effect pill and watch your internal governance collapse.</p>
+          <p>Rotate the decision chamber and prescribe another floating 3D capsule with absolutely no effect.</p>
           <button className="pill-button" type="button" onClick={() => setPillDoses((dose) => dose + 1)}>
             TAKE PILL <span>CAPSULE {String(pillDoses + 1).padStart(2, "0")}</span>
           </button>
           <p className="brain-response" aria-live="polite">{reactions[pillDoses % reactions.length]}</p>
         </div>
         <div className={`machine machine-brain dose-${Math.min(pillDoses, 3)}`}>
-          <div className="machine-label"><span>DECISION OVERRIDE SIMULATOR</span><span>{pillDoses} DOSE{pillDoses === 1 ? "" : "S"}</span></div>
-          <button
-            className="image-button brain-stage"
-            type="button"
-            aria-label="Take another no-effect pill"
-            onClick={() => setPillDoses((dose) => dose + 1)}
-          >
-            <Image src="/interactable-memes/source/brain-pill.png" alt="Morty saying: You son of a bitch, I'm in" width={500} height={488} />
-            {pillDoses > 0 && <span className="falling-pill" key={pillDoses} aria-hidden="true"><i /><b /></span>}
-            <span className="approval-stamp" aria-hidden="true">BRAIN<br />APPROVED</span>
+          <div className="machine-label"><span>VOLUMETRIC DECISION OVERRIDE</span><span>{pillDoses} DOSE{pillDoses === 1 ? "" : "S"}</span></div>
+          <MemeDiorama
+            src="/interactable-memes/source/brain-pill.png"
+            imageWidth={500}
+            imageHeight={488}
+            variant="brain"
+            accent="#ef334e"
+            motion={pillDoses}
+            ariaLabel="3D brain and pill chamber. Drag to orbit and tap to take another pill."
+            onAction={() => setPillDoses((dose) => dose + 1)}
+          />
+          <p className="machine-tip">SIDE EFFECTS / VOLUMETRIC CONFIDENCE, DEPTH, MORE MEMES</p>
+        </div>
+      </section>
+
+      <section className="meme-room room-demo" id="demo">
+        <div className="room-copy">
+          <p className="room-index">05 / CLIENT DEMO STABILIZER</p>
+          <h2>Product not ready.<br /><em>Client is.</em></h2>
+          <p>Hold the 3D plane together with an excavator, confidence, and increasingly aggressive demo theatre.</p>
+          <button className="demo-trigger" type="button" onClick={() => setDemoLevel((level) => (level + 1) % demoStates.length)}>
+            SHIP THE DEMO ANYWAY <span>↗</span>
           </button>
-          <p className="machine-tip">SIDE EFFECTS / COMMITMENT, CONFIDENCE, MORE MEMES</p>
+          <p className="demo-status" aria-live="polite">{demoStates[demoLevel]}</p>
+        </div>
+        <div className={`machine machine-demo demo-level-${demoLevel}`}>
+          <div className="machine-label"><span>PRODUCTION READINESS SIMULATOR / ALLEGEDLY 3D</span><span>{12 + demoLevel * 22}% STABLE</span></div>
+          <MemeDiorama
+            src="/interactable-memes/source/client-demo.png"
+            imageWidth={1453}
+            imageHeight={1094}
+            variant="demo"
+            accent="#ffdc3d"
+            motion={demoLevel}
+            ariaLabel="3D excavator holding up an airplane. Drag to orbit and tap to make the client demo shakier."
+            onAction={() => setDemoLevel((level) => (level + 1) % demoStates.length)}
+          />
+          <p className="machine-tip">CLIENT MODE / TAP TO ADD CONFIDENCE · NEVER REFRESH</p>
         </div>
       </section>
 
       <footer className="manifesto" id="about">
-        <p className="manifesto-index">05 / FIELD NOTES</p>
-        <h2>Memes were never meant to sit still.<br /><span>So we taught them some moves.</span></h2>
+        <p className="manifesto-index">06 / FIELD NOTES</p>
+        <h2>Memes were never meant to sit still.<br /><span>Now they refuse to stay flat.</span></h2>
         <div className="manifesto-grid">
-          <p>Four images entered the lab. They left with buttons, knobs, questionable physics, and a much stronger sense of agency.</p>
-          <p className="aside-copy">BUILT FOR CURIOUS POINTERS<br />TOUCHSCREENS WELCOME<br /><strong>EST. 2026</strong></p>
+          <p>Five images entered the lab. They left as lit, orbitable 3D dioramas with props, controls, questionable physics, and a much stronger sense of agency.</p>
+          <p className="aside-copy">BUILT WITH THREE.JS<br />POINTERS + TOUCHSCREENS WELCOME<br /><strong>DEPTH: UNNECESSARY</strong></p>
         </div>
         <a className="back-to-top" href="#top">RUN THE EXPERIMENT AGAIN ↑</a>
       </footer>
