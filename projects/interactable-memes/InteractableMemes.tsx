@@ -67,9 +67,9 @@ export default function InteractableMemes() {
   return (
     <main>
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="Interactable Memes home">
-          <span className="brand-mark">IM</span>
-          <span>INTERACTABLE<br />MEMES</span>
+        <a className="brand" href="#top" aria-label="Internet Nonsense Lab home">
+          <span className="brand-mark">NL</span>
+          <span>INTERNET<br />NONSENSE LAB</span>
         </a>
         <nav className="chapter-nav" aria-label="Meme machines">
           <a href="#standoff">01</a><a href="#scratch">02</a><a href="#reactor">03</a><a href="#brain">04</a><a href="#demo">05</a>
@@ -91,7 +91,7 @@ export default function InteractableMemes() {
       </header>
 
       <section className="hero" id="top">
-        <Image className="hero-art" src="/interactable-memes/og-v8.png" alt="Interactable Memes ensemble with a compact four-direction nod character and Godzilla staring awkwardly at a gorilla in the polished low-poly studio art direction" fill priority sizes="100vw" />
+        <Image className="hero-art" src="/interactable-memes/og-v9.png" alt="Internet Nonsense Lab ensemble with a compact four-direction nod character and Godzilla staring awkwardly at a gorilla in the polished low-poly studio art direction" fill priority sizes="100vw" />
         <div className="hero-shade" aria-hidden="true" />
         <div className="hero-noise" aria-hidden="true" />
         <div className="hero-copy">

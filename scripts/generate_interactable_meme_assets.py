@@ -1,4 +1,4 @@
-"""Generate the five low-poly dioramas used by Interactable Memes.
+"""Generate the five low-poly dioramas used by Internet Nonsense Lab.
 
 Run from the repository root:
   /Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup \

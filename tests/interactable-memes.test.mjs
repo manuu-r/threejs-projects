@@ -29,7 +29,11 @@ test("server-renders the interactable memes experience", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>Interactable Memes — Memes You Can Orbit · Three\.js Fun<\/title>/i);
+  assert.match(html, /<title>Internet Nonsense Lab — Please Touch Everything · Three\.js Fun<\/title>/i);
+  assert.match(html, /Internet Nonsense Lab home/);
+  assert.match(html, /INTERNET/);
+  assert.match(html, /NONSENSE LAB/);
+  assert.match(html, /favicon-v2\.png/);
   assert.match(html, /THE MEME\./);
   assert.match(html, /THEN THE WORLD\./);
   assert.match(html, /RESET THE LAB/);
@@ -123,6 +127,7 @@ test("ships absolute social preview metadata", async () => {
   const response = await render();
   const html = await response.text();
 
-  assert.match(html, /property="og:image" content="http:\/\/localhost:3000\/interactable-memes\/og-v8\.png"/i);
+  assert.match(html, /property="og:image" content="http:\/\/localhost:3000\/interactable-memes\/og-v9\.png"/i);
   assert.match(html, /name="twitter:card" content="summary_large_image"/i);
+  assert.match(html, /name="twitter:image" content="http:\/\/localhost:3000\/interactable-memes\/og-v9\.png"/i);
 });

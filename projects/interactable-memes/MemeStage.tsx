@@ -35,7 +35,7 @@ function createMemeTexture(meme: (typeof memes)[number]) {
 
   context.font = "700 25px Courier New";
   context.textAlign = "left";
-  context.fillText("INTERACTABLE MEMES®", 64, 1082);
+  context.fillText("INTERNET NONSENSE LAB®", 64, 1082);
   context.textAlign = "right";
   context.fillText("TOUCH ME", 836, 1082);
 
