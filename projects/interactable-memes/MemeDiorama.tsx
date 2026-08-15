@@ -30,6 +30,7 @@ type SceneActors = {
   pills: THREE.Object3D[];
   portalRings: THREE.Object3D[];
   smoke: THREE.Object3D[];
+  starePupils: THREE.Object3D[];
   officeHero?: THREE.Object3D;
   cat?: THREE.Object3D;
   gorilla?: THREE.Object3D;
@@ -103,6 +104,7 @@ function collectActors(asset: THREE.Object3D): SceneActors {
     pills: namedChildren(asset, "Pill_").filter((object) => /^Pill_\d+$/.test(object.name)),
     portalRings: namedChildren(asset, "PortalRing_"),
     smoke: namedChildren(asset, "Smoke_"),
+    starePupils: namedChildren(asset, "TrexStarePupil_"),
     officeHero: asset.getObjectByName("OfficeHero"),
     cat: asset.getObjectByName("DJCat"),
     gorilla: asset.getObjectByName("Gorilla"),
@@ -372,18 +374,22 @@ export function MemeDiorama({
       if (variant === "scratch") animateScratch(elapsed, delta, live);
       if (variant === "reactor") {
         const power = Math.min(live.motion, 3);
-        if (actors.reactor) {
-          actors.reactor.rotation.y += delta * (0.65 + power * 0.5);
-          const base = baseScale(actors.reactor);
-          const pulse = 1 + power * 0.06 + Math.sin(elapsed * (2.2 + power)) * 0.04 + impact * 0.08;
-          actors.reactor.scale.set(base.x * pulse, base.y * pulse, base.z * pulse);
+        if (actors.gorilla) {
+          const base = basePosition(actors.gorilla);
+          actors.gorilla.position.x = base.x - power * 0.035 - impact * 0.08;
+          actors.gorilla.rotation.z = baseRotation(actors.gorilla).z - Math.sin(elapsed * 0.75) * (0.006 + power * 0.008) - impact * 0.035;
         }
-        if (actors.gorilla) actors.gorilla.rotation.z = baseRotation(actors.gorilla).z + Math.sin(elapsed * (1.1 + power * 0.4)) * (0.012 + power * 0.014);
-        if (actors.trex) actors.trex.rotation.z = baseRotation(actors.trex).z + Math.sin(elapsed * 1.35) * 0.018 - impact * 0.055;
-        actors.smoke.forEach((puff, index) => {
-          puff.position.y = basePosition(puff).y + Math.sin(elapsed * 0.9 + index * 0.7) * 0.07;
+        if (actors.trex) {
+          const base = basePosition(actors.trex);
+          actors.trex.position.x = base.x - power * 0.06 - impact * 0.13;
+          actors.trex.rotation.z = baseRotation(actors.trex).z + Math.sin(elapsed * (0.65 + power * 0.08)) * (0.008 + power * 0.01) + impact * 0.04;
+        }
+        actors.starePupils.forEach((pupil, index) => {
+          const base = basePosition(pupil);
+          pupil.position.x = base.x - Math.abs(Math.sin(elapsed * 0.8 + index * 0.5)) * (0.018 + power * 0.015);
+          pupil.position.y = base.y - impact * 0.025;
         });
-        rim.intensity = 40 + power * 12 + impact * 18;
+        rim.intensity = 34 + power * 5 + impact * 8;
       }
       if (variant === "brain") {
         actors.portalRings.forEach((ring, index) => {
@@ -404,10 +410,14 @@ export function MemeDiorama({
         if (actors.propeller) actors.propeller.rotation.x = baseRotation(actors.propeller).x + elapsed * (3.8 + panic * 1.4);
         if (actors.plane) {
           const base = basePosition(actors.plane);
-          actors.plane.position.y = base.y + Math.sin(elapsed * (1.5 + panic * 0.25)) * (0.025 + panic * 0.018);
-          actors.plane.rotation.z = baseRotation(actors.plane).z + Math.sin(elapsed * 1.3) * (0.018 + panic * 0.018) + impact * 0.08;
+          actors.plane.position.y = base.y + Math.sin(elapsed * (1.5 + panic * 0.25)) * (0.012 + panic * 0.008);
+          actors.plane.rotation.z = baseRotation(actors.plane).z + Math.sin(elapsed * 1.3) * (0.008 + panic * 0.008);
         }
-        if (actors.excavatorArm) actors.excavatorArm.rotation.z = baseRotation(actors.excavatorArm).z + Math.sin(elapsed * 1.05) * 0.014 + panic * 0.008 + impact * 0.04;
+        if (actors.excavatorArm) {
+          const base = baseRotation(actors.excavatorArm);
+          actors.excavatorArm.rotation.y = base.y + elapsed * (0.24 + panic * 0.16) + impact * 0.28;
+          actors.excavatorArm.rotation.z = base.z + Math.sin(elapsed * 1.05) * (0.018 + panic * 0.008);
+        }
       }
     }
 

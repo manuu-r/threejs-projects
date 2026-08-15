@@ -4,14 +4,15 @@ Run from the repository root:
   /Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup \
     --python scripts/generate_interactable_meme_assets.py
 
-The script intentionally uses only Blender primitives. That keeps the art direction coherent,
-the exported GLBs small, and every animated node under our control in Three.js.
+The environments are modeled in Blender and the character-led scenes reuse the project's
+licensed production meshes. Every browser-animated part is exported under a stable name.
 """
 
 from __future__ import annotations
 
 import math
 from pathlib import Path
+import sys
 
 import bpy
 from mathutils import Vector
@@ -21,6 +22,8 @@ REPO = Path(__file__).resolve().parents[1]
 MODEL_DIR = REPO / "public" / "interactable-memes" / "studio-models"
 PREVIEW_DIR = REPO / "public" / "interactable-memes" / "studio-previews"
 SOURCE_DIR = REPO / "art" / "interactable-memes"
+LICENSED_MODEL_DIR = REPO / "public" / "interactable-memes" / "models"
+HAND_MODEL_DIR = REPO / "public" / "assets" / "hands"
 
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
@@ -295,53 +298,155 @@ def base_platform(root: bpy.types.Object, color: str, accent: str, *, shape: str
         box("Stage_Trim", (0, -3.02, 0.08), (4.12, 0.08, 0.14), trim, bevel=0.03, parent=root)
 
 
+def hierarchy_meshes(objects: list[bpy.types.Object]) -> list[bpy.types.Object]:
+    return [
+        obj
+        for obj in objects
+        if obj.type == "MESH"
+        and not obj.name.startswith("Icosphere")
+        and not obj.hide_render
+    ]
+
+
+def world_bounds(objects: list[bpy.types.Object]) -> tuple[Vector, Vector]:
+    points = [
+        obj.matrix_world @ Vector(corner)
+        for obj in hierarchy_meshes(objects)
+        for corner in obj.bound_box
+    ]
+    if not points:
+        return Vector((0, 0, 0)), Vector((1, 1, 1))
+    low = Vector((min(point.x for point in points), min(point.y for point in points), min(point.z for point in points)))
+    high = Vector((max(point.x for point in points), max(point.y for point in points), max(point.z for point in points)))
+    return low, high
+
+
+def import_glb_group(
+    path: Path,
+    name: str,
+    parent: bpy.types.Object,
+    *,
+    target_size: float,
+    location: tuple[float, float, float],
+    fit: str = "height",
+    rotation: tuple[float, float, float] = (0, 0, 0),
+    center_location: bool = False,
+) -> tuple[bpy.types.Object, list[bpy.types.Object]]:
+    before = set(bpy.context.scene.objects)
+    bpy.ops.import_scene.gltf(filepath=str(path))
+    imported = [obj for obj in bpy.context.scene.objects if obj not in before]
+    wrapper = empty(name, parent)
+    top_level = [obj for obj in imported if obj.parent not in imported]
+    for obj in top_level:
+        obj.parent = wrapper
+    wrapper.rotation_euler = rotation
+    bpy.context.view_layer.update()
+
+    low, high = world_bounds(imported)
+    size = high - low
+    metric = size.z if fit == "height" else max(size.x, size.y, size.z)
+    uniform_scale = target_size / max(metric, 0.001)
+    wrapper.scale = (uniform_scale, uniform_scale, uniform_scale)
+    bpy.context.view_layer.update()
+
+    low, high = world_bounds(imported)
+    center = (low + high) * 0.5
+    target = Vector(location)
+    if center_location:
+        wrapper.location += target - center
+    else:
+        wrapper.location += target - Vector((center.x, center.y, low.z))
+    bpy.context.view_layer.update()
+
+    for obj in hierarchy_meshes(imported):
+        for polygon in obj.data.polygons:
+            polygon.use_smooth = False
+    return wrapper, imported
+
+
+def imported_armature(objects: list[bpy.types.Object]) -> bpy.types.Object | None:
+    return next((obj for obj in objects if obj.type == "ARMATURE"), None)
+
+
+def set_action_pose(objects: list[bpy.types.Object], action_suffix: str, frame: float) -> None:
+    rig = imported_armature(objects)
+    action = next((candidate for candidate in bpy.data.actions if candidate.name.endswith(action_suffix)), None)
+    if not rig or not action:
+        return
+    rig.animation_data_create()
+    rig.animation_data.action = action
+    bpy.context.scene.frame_set(int(frame))
+    bpy.context.view_layer.update()
+
+
+def recolor_imported_meshes(objects: list[bpy.types.Object], mat: bpy.types.Material) -> None:
+    for obj in hierarchy_meshes(objects):
+        if not obj.material_slots:
+            obj.data.materials.append(mat)
+            continue
+        for slot in obj.material_slots:
+            slot.material = mat
+
+
+def parent_keep_world(obj: bpy.types.Object, parent: bpy.types.Object) -> None:
+    world_matrix = obj.matrix_world.copy()
+    obj.parent = parent
+    obj.matrix_world = world_matrix
+
+
+def pose_webxr_finger_gun(objects: list[bpy.types.Object]) -> None:
+    rig = imported_armature(objects)
+    if not rig:
+        return
+    for finger in ("middle", "ring", "pinky"):
+        for joint, curl in (
+            ("metacarpal", 0.42),
+            ("phalanx-proximal", 1.35),
+            ("phalanx-intermediate", 1.45),
+            ("phalanx-distal", 1.08),
+        ):
+            bone = rig.pose.bones.get(f"{finger}-finger-{joint}")
+            if not bone:
+                continue
+            bone.rotation_mode = "XYZ"
+            bone.rotation_euler.y = curl
+    bpy.context.view_layer.update()
+
+
 def make_business_man(root: bpy.types.Object) -> bpy.types.Object:
-    man = empty("OfficeHero", root)
-    suit = material("Suit charcoal", "#22262f", roughness=0.55)
-    shirt = material("Shirt", "#e9eef0", roughness=0.5)
-    tie = material("Tie", "#8f2637", roughness=0.5)
-    skin = material("Office skin", PALETTE["skin"], roughness=0.56)
-    hair = material("Office hair", PALETTE["hair"], roughness=0.72)
-    shoes = material("Shoes", "#111318", roughness=0.36)
-
-    segment("Leg_L", (-0.38, 0, 0.28), (-0.55, -0.02, 1.32), 0.25, suit, end_radius=0.2, parent=man)
-    segment("Leg_R", (0.48, 0, 0.28), (0.42, -0.02, 1.35), 0.25, suit, end_radius=0.2, parent=man)
-    box("Shoe_L", (-0.58, -0.14, 0.22), (0.28, 0.44, 0.18), shoes, rot=(0, 0, -0.1), bevel=0.08, parent=man)
-    box("Shoe_R", (0.47, -0.14, 0.22), (0.28, 0.44, 0.18), shoes, rot=(0, 0, 0.08), bevel=0.08, parent=man)
-    box("Torso", (0, 0, 1.86), (0.72, 0.38, 0.72), suit, bevel=0.14, parent=man)
-    box("ShirtFront", (0, -0.395, 1.94), (0.25, 0.035, 0.56), shirt, bevel=0.02, parent=man)
-    cone("Tie", (0, -0.445, 1.91), 0.12, 0.035, 0.82, tie, vertices=4, parent=man)
-    ico("Head", (0, -0.02, 2.86), (0.49, 0.42, 0.58), skin, subdivisions=2, parent=man)
-    ico("Hair", (0, 0.04, 3.18), (0.48, 0.38, 0.28), hair, subdivisions=1, parent=man)
-    box("Hairline", (0, -0.37, 3.03), (0.4, 0.06, 0.16), hair, rot=(0.08, 0, 0), bevel=0.06, parent=man)
-    eye("OfficeEye_L", (-0.19, -0.41, 2.95), 0.74, man)
-    eye("OfficeEye_R", (0.19, -0.41, 2.95), 0.74, man)
-    segment("Brow_L", (-0.31, -0.5, 3.09), (-0.08, -0.52, 3.04), 0.035, hair, parent=man)
-    segment("Brow_R", (0.08, -0.52, 3.04), (0.31, -0.5, 3.09), 0.035, hair, parent=man)
-    box("Mouth", (0, -0.46, 2.67), (0.18, 0.025, 0.035), hair, bevel=0.02, parent=man)
-
-    for side in (-1, 1):
-        shoulder = (0.62 * side, -0.02, 2.25)
-        elbow = (1.25 * side, -0.25, 2.15)
-        palm = (1.88 * side, -0.42, 2.35)
-        segment(f"ArmUpper_{side}", shoulder, elbow, 0.22, suit, end_radius=0.18, parent=man)
-        segment(f"ArmLower_{side}", elbow, palm, 0.18, suit, end_radius=0.13, parent=man)
-        ico(f"Palm_{side}", palm, (0.22, 0.13, 0.18), skin, subdivisions=1, parent=man)
-        segment(f"HeroIndex_{side}", palm, (2.35 * side, -0.5, 2.37), 0.07, skin, end_radius=0.05, parent=man)
-        segment(f"HeroThumb_{side}", palm, (2.0 * side, -0.48, 2.67), 0.075, skin, end_radius=0.05, parent=man)
+    man, imported = import_glb_group(
+        LICENSED_MODEL_DIR / "business-man.glb",
+        "OfficeHero",
+        root,
+        target_size=3.65,
+        location=(0, -0.05, 0.2),
+        fit="height",
+    )
+    set_action_pose(imported, "Idle_Gun_Pointing", 18)
     return man
 
 
 def make_finger_gun(name: str, loc: tuple[float, float, float], side: int, parent: bpy.types.Object) -> bpy.types.Object:
-    gun = empty(name, parent)
     skin = material("Foreground skin", PALETTE["skin_light"], roughness=0.54)
     sleeve_colors = ("#334133", "#9c2d32", "#e6e3da", "#2d405c")
     sleeve = material(f"{name}_Sleeve", sleeve_colors[int(name.split("_")[-1]) % len(sleeve_colors)], roughness=0.64)
-    gun.location = loc
-    segment(name + "_Sleeve", (-1.2 * side, 0.12, -0.04), (-0.18 * side, 0, 0), 0.28, sleeve, end_radius=0.2, parent=gun)
-    ico(name + "_Palm", (0, 0, 0), (0.34, 0.18, 0.25), skin, subdivisions=1, parent=gun)
-    segment(name + "_Index", (0.16 * side, -0.03, 0.08), (0.94 * side, -0.08, 0.08), 0.105, skin, end_radius=0.07, parent=gun)
-    segment(name + "_Thumb", (0.08 * side, -0.01, 0.14), (0.34 * side, -0.02, 0.52), 0.095, skin, end_radius=0.06, parent=gun)
+    hand_file = "left.glb" if side == 1 else "right.glb"
+    gun, imported = import_glb_group(
+        HAND_MODEL_DIR / hand_file,
+        name,
+        parent,
+        target_size=2.05,
+        location=loc,
+        fit="span",
+        rotation=(0, -side * math.pi / 2, 0),
+        center_location=True,
+    )
+    pose_webxr_finger_gun(imported)
+    recolor_imported_meshes(imported, skin)
+    sleeve_start = (loc[0] - side * 1.38, loc[1] + 0.12, loc[2] - 0.02)
+    sleeve_end = (loc[0] - side * 0.58, loc[1] + 0.03, loc[2])
+    segment(name + "_Sleeve", sleeve_start, sleeve_end, 0.3, sleeve, end_radius=0.22, parent=parent)
+    box(name + "_Cuff", sleeve_end, (0.12, 0.19, 0.22), material("Shirt cuffs", "#f1efe8", roughness=0.6), bevel=0.04, parent=parent)
     return gun
 
 
@@ -447,76 +552,77 @@ def build_scratch() -> bpy.types.Object:
 
 
 def make_gorilla(root: bpy.types.Object) -> bpy.types.Object:
-    gorilla = empty("Gorilla", root)
-    fur = material("Gorilla fur", "#252526", roughness=0.88)
-    fur_mid = material("Gorilla chest", "#4b4640", roughness=0.82)
-    face = material("Gorilla face", "#51483f", roughness=0.76)
-    eye_mat = material("Gorilla eyes", PALETTE["acid"], roughness=0.28, emission=0.35)
-    ico("GorillaTorso", (-1.65, 0.15, 1.65), (0.88, 0.66, 1.18), fur, subdivisions=2, rot=(0.05, 0.08, -0.08), parent=gorilla)
-    ico("GorillaBelly", (-1.58, -0.57, 1.58), (0.58, 0.18, 0.73), fur_mid, subdivisions=2, parent=gorilla)
-    ico("GorillaHead", (-1.6, -0.02, 2.95), (0.58, 0.5, 0.58), fur, subdivisions=2, parent=gorilla)
-    ico("GorillaMuzzle", (-1.58, -0.53, 2.78), (0.45, 0.26, 0.31), face, subdivisions=1, parent=gorilla)
-    for side in (-1, 1):
-        x = -1.65 + 0.37 * side
-        ico(f"GorillaEye_{side}", (x, -0.48, 3.08), (0.065, 0.04, 0.065), eye_mat, subdivisions=2, parent=gorilla)
-        shoulder = (-1.65 + 0.7 * side, 0, 2.35)
-        hand = (-1.65 + 1.16 * side, -0.2, 0.55)
-        segment(f"GorillaArm_{side}", shoulder, hand, 0.32, fur, end_radius=0.25, parent=gorilla)
-        ico(f"GorillaFist_{side}", hand, (0.38, 0.32, 0.34), fur_mid, subdivisions=1, parent=gorilla)
-        segment(f"GorillaLeg_{side}", (-1.65 + 0.45 * side, 0.15, 1.0), (-1.65 + 0.58 * side, -0.05, 0.35), 0.3, fur, end_radius=0.24, parent=gorilla)
+    gorilla, _ = import_glb_group(
+        LICENSED_MODEL_DIR / "gorilla.glb",
+        "Gorilla",
+        root,
+        target_size=3.15,
+        location=(-1.55, 0.22, 0.24),
+        fit="height",
+        rotation=(0, 0, 0.48),
+    )
     return gorilla
 
 
 def make_trex(root: bpy.types.Object) -> bpy.types.Object:
-    trex = empty("Trex", root)
-    green = material("Trex green", PALETTE["green"], roughness=0.68, emission=0.06)
-    dark = material("Trex dark", PALETTE["green_dark"], roughness=0.74)
-    mouth = material("Trex mouth", "#8d2639", roughness=0.6)
-    eye_mat = material("Trex eye", "#ffe344", roughness=0.25, emission=0.25)
-    ico("TrexBody", (1.45, 0.15, 1.75), (1.14, 0.62, 0.85), green, subdivisions=2, rot=(0.05, -0.08, -0.08), parent=trex)
-    segment("TrexNeck", (1.7, 0.05, 2.2), (2.15, -0.05, 2.85), 0.45, green, end_radius=0.34, parent=trex)
-    ico("TrexHead", (2.38, -0.2, 3.12), (0.86, 0.52, 0.48), green, subdivisions=2, rot=(0, -0.08, -0.08), parent=trex)
-    box("TrexJaw", (2.55, -0.43, 2.82), (0.73, 0.27, 0.18), mouth, rot=(0, -0.06, -0.12), bevel=0.12, parent=trex)
-    tooth_row("TrexTooth", [2.05 + i * 0.16 for i in range(7)], -0.72, 2.92, trex)
-    ico("TrexEye", (2.55, -0.68, 3.3), (0.11, 0.05, 0.12), eye_mat, subdivisions=2, parent=trex)
-    ico("TrexPupil", (2.57, -0.725, 3.3), (0.035, 0.018, 0.07), material("Trex pupil", PALETTE["ink"]), subdivisions=1, parent=trex)
-    tail_points = [(0.7, 0.18, 1.8), (-0.1, 0.28, 1.7), (-0.8, 0.35, 1.48), (-1.35, 0.42, 1.25)]
-    previous = (1.0, 0.18, 1.8)
-    radii = [0.48, 0.36, 0.24, 0.1]
-    for index, point in enumerate(tail_points):
-        segment(f"TrexTail_{index}", previous, point, radii[index], green if index < 2 else dark, end_radius=radii[index] * 0.65, parent=trex)
-        previous = point
-    for side in (-1, 1):
-        y = 0.2 + side * 0.34
-        segment(f"TrexThigh_{side}", (1.3, y, 1.35), (1.05, y, 0.58), 0.36, green, end_radius=0.24, parent=trex)
-        segment(f"TrexShin_{side}", (1.05, y, 0.58), (1.48, y - 0.08, 0.25), 0.2, dark, end_radius=0.14, parent=trex)
-        box(f"TrexFoot_{side}", (1.65, y - 0.16, 0.2), (0.38, 0.26, 0.13), dark, bevel=0.07, parent=trex)
-        segment(f"TrexTinyArm_{side}", (1.93, -0.3 + side * 0.2, 2.55), (2.25, -0.48 + side * 0.2, 2.28), 0.09, green, end_radius=0.055, parent=trex)
-    for index in range(7):
-        cone(f"TrexSpine_{index}", (0.5 + index * 0.31, 0.15, 2.48 + math.sin(index * 0.5) * 0.18), 0.13, 0, 0.34, dark, vertices=5, rot=(0.1, 0, 0), parent=trex)
+    trex, imported = import_glb_group(
+        LICENSED_MODEL_DIR / "trex.glb",
+        "Trex",
+        root,
+        target_size=4.3,
+        location=(1.65, 0.2, 0.24),
+        fit="span",
+        rotation=(0, 0, -math.pi / 2),
+    )
+    set_action_pose(imported, "TRex_Idle", 24)
+
+    rig = imported_armature(imported)
+    head = rig.pose.bones.get("Head") if rig else None
+    if rig and head:
+        stare_at = rig.matrix_world @ head.tail
+    else:
+        stare_at = Vector((0.25, -0.1, 2.15))
+    white = material("Trex awkward eye whites", "#fff9e9", roughness=0.28)
+    pupil = material("Trex awkward pupils", "#111016", roughness=0.25)
+    eye_positions = [
+        stare_at + Vector((-0.08, -0.28, 0.16)),
+        stare_at + Vector((0.13, -0.25, 0.04)),
+    ]
+    for index, position in enumerate(eye_positions):
+        eyeball = ico(f"TrexStareEye_{index}", tuple(position), (0.15, 0.09, 0.17), white, subdivisions=2)
+        pupil_obj = ico(
+            f"TrexStarePupil_{index}",
+            tuple(position + Vector((-0.055, -0.085, -0.012))),
+            (0.045, 0.025, 0.06),
+            pupil,
+            subdivisions=2,
+        )
+        parent_keep_world(eyeball, trex)
+        parent_keep_world(pupil_obj, trex)
     return trex
 
 
 def build_reactor() -> bpy.types.Object:
     root = empty("ReactorScene")
-    base_platform(root, "#273322", PALETTE["acid"], shape="round")
-    rock = material("Reactor rock", "#3c423a", roughness=0.9)
-    grass = material("Reactor grass", "#487f34", roughness=0.86)
-    glow = material("Reactor glow", PALETTE["acid"], roughness=0.25, emission=2.5)
-    smoke = material("Radioactive smoke", "#79c900", roughness=0.7, emission=0.32, alpha=0.45)
-    for index in range(20):
+    base_platform(root, "#26321f", "#79a93f", shape="round")
+    rock = material("Habitat rock", "#5a574d", roughness=0.9)
+    grass = material("Habitat grass", "#3c6c2e", roughness=0.86)
+    bark = material("Palm bark", "#6d4828", roughness=0.9)
+    leaf = material("Palm leaves", "#376f2f", roughness=0.82)
+    for index in range(24):
         angle = index * 2.4
         radius = 2.0 + (index % 5) * 0.38
         loc = (math.cos(angle) * radius, math.sin(angle) * radius * 0.68, 0.25 + (index % 3) * 0.08)
         ico(f"Rock_{index:02d}", loc, (0.32 + (index % 4) * 0.09, 0.28, 0.24 + (index % 3) * 0.08), rock if index % 3 else grass, subdivisions=1, rot=(index * 0.2, index * 0.1, index * 0.3), parent=root)
+    for palm_x in (-3.2, 3.15):
+        segment(f"PalmTrunk_{palm_x}", (palm_x, 1.45, 0.28), (palm_x * 0.92, 1.45, 2.75), 0.15, bark, end_radius=0.09, parent=root)
+        for index in range(7):
+            angle = index / 7 * math.tau
+            start = (palm_x * 0.92, 1.45, 2.68)
+            end = (start[0] + math.cos(angle) * 1.15, start[1] + math.sin(angle) * 0.8, 2.48 + math.sin(index) * 0.18)
+            segment(f"PalmLeaf_{palm_x}_{index}", start, end, 0.11, leaf, end_radius=0.025, vertices=6, parent=root)
     make_gorilla(root)
     make_trex(root)
-    reactor = empty("ReactorCore", root)
-    ico("CoreCrystal", (0.1, -0.65, 1.25), (0.44, 0.44, 0.58), glow, subdivisions=2, rot=(0.2, 0, 0.3), parent=reactor)
-    for index in range(3):
-        torus(f"CoreRing_{index}", (0.1, -0.65, 1.25), 0.67 + index * 0.19, 0.035, glow, rot=(index * 0.6, index * 0.4, index * 0.8), parent=reactor)
-    for index in range(9):
-        ico(f"Smoke_{index:02d}", (-0.2 + (index % 3) * 0.28, 0.3, 2.5 + index * 0.22), (0.28 + (index % 2) * 0.12, 0.22, 0.3), smoke, subdivisions=1, parent=root)
     return root
 
 
@@ -648,38 +754,33 @@ def make_excavator(root: bpy.types.Object) -> tuple[bpy.types.Object, bpy.types.
     for x in (-1.68, -0.52):
         segment(f"CabFrame_{x}", (x, -0.68, 1.08), (x, -0.68, 2.42), 0.045, dark, parent=rig)
     arm = empty("ExcavatorArm", rig)
-    segment("ExcavatorBoom", (-0.65, 0, 1.82), (1.05, 0, 3.08), 0.23, yellow, end_radius=0.17, parent=arm)
-    segment("ExcavatorStick", (1.05, 0, 3.08), (2.32, 0, 2.18), 0.18, yellow, end_radius=0.12, parent=arm)
-    segment("BoomHydraulic", (-0.5, -0.28, 2.0), (1.32, -0.28, 2.78), 0.06, wheel, end_radius=0.045, parent=arm)
-    box("ExcavatorBucket", (2.58, 0, 1.86), (0.5, 0.65, 0.42), dark, rot=(0, -0.25, 0), bevel=0.12, parent=arm)
-    for index in range(4):
-        cone(f"BucketTooth_{index}", (2.95, -0.42 + index * 0.28, 1.64), 0.07, 0, 0.28, dark, vertices=6, rot=(0, math.pi / 2, 0), parent=arm)
+    segment("ExcavatorBoom", (-0.65, 0, 1.82), (0.95, 0, 3.42), 0.25, yellow, end_radius=0.18, parent=arm)
+    segment("ExcavatorStick", (0.95, 0, 3.42), (2.5, 0, 3.04), 0.19, yellow, end_radius=0.13, parent=arm)
+    segment("BoomHydraulic", (-0.5, -0.28, 2.0), (1.18, -0.28, 3.16), 0.065, wheel, end_radius=0.045, parent=arm)
+    segment("StickHydraulic", (0.88, -0.22, 3.25), (2.38, -0.22, 3.0), 0.05, wheel, end_radius=0.035, parent=arm)
+    box("ExcavatorBucket", (2.72, 0, 2.82), (0.52, 0.72, 0.24), dark, rot=(0, 0.18, 0), bevel=0.1, parent=arm)
+    for side in (-1, 1):
+        segment(f"PlaneCradle_{side}", (2.48, side * 0.58, 2.96), (1.62, side * 0.58, 3.12), 0.065, dark, end_radius=0.05, parent=arm)
+        box(f"PlaneClamp_{side}", (1.56, side * 0.58, 3.24), (0.1, 0.13, 0.24), yellow, rot=(0, -0.25, 0), bevel=0.05, parent=arm)
+    for index in range(5):
+        cone(f"BucketTooth_{index}", (3.08, -0.52 + index * 0.26, 2.73), 0.065, 0, 0.25, dark, vertices=6, rot=(0, math.pi / 2, 0), parent=arm)
     return rig, arm
 
 
-def make_plane(root: bpy.types.Object) -> bpy.types.Object:
-    plane = empty("PlaneRig", root)
-    white = material("Plane body", "#ebe9df", roughness=0.48, metallic=0.06)
-    gold = material("Plane underwing", "#b9781f", roughness=0.5)
-    stripe = material("Plane stripe", "#293442", roughness=0.42)
-    glass = material("Plane windows", "#202b34", roughness=0.25, metallic=0.15)
-    metal = material("Propeller", "#b7b2a8", roughness=0.28, metallic=0.62)
-    ico("PlaneFuselage", (1.35, -0.12, 3.65), (1.9, 0.43, 0.42), white, subdivisions=2, rot=(0, 0.04, -0.05), parent=plane)
-    box("PlaneStripe", (1.35, -0.54, 3.58), (1.45, 0.035, 0.08), stripe, rot=(0, 0.04, -0.05), bevel=0.02, parent=plane)
-    box("PlaneWing", (1.15, -0.05, 3.52), (1.15, 2.05, 0.09), white, rot=(0, -0.06, 0), bevel=0.1, parent=plane)
-    box("PlaneWingGold", (1.15, -0.05, 3.42), (1.06, 1.9, 0.035), gold, rot=(0, -0.06, 0), bevel=0.04, parent=plane)
-    box("PlaneTailWing", (-0.15, 0, 3.77), (0.58, 0.82, 0.055), white, rot=(0, 0.1, 0), bevel=0.07, parent=plane)
-    box("PlaneTailFin", (-0.32, 0.02, 4.18), (0.42, 0.07, 0.48), white, rot=(0, 0.2, 0), bevel=0.08, parent=plane)
-    for index in range(4):
-        box(f"PlaneWindow_{index}", (0.63 + index * 0.34, -0.54, 3.78), (0.11, 0.025, 0.1), glass, rot=(0, 0, -0.03), bevel=0.035, parent=plane)
-    prop = empty("Propeller", plane)
-    prop.location = (3.28, -0.1, 3.64)
-    cylinder("PropHub", (0, 0, 0), 0.17, 0.25, metal, vertices=12, rot=(0, math.pi / 2, 0), parent=prop)
-    box("PropBlade_A", (0.1, 0, 0), (0.06, 0.05, 0.78), metal, rot=(0.12, 0, 0.15), bevel=0.05, parent=prop)
-    box("PropBlade_B", (0.1, 0, 0), (0.06, 0.78, 0.05), metal, rot=(0.12, 0, 0.15), bevel=0.05, parent=prop)
-    for side in (-1, 1):
-        cylinder(f"PlaneWheel_{side}", (0.9, side * 0.66, 3.02), 0.18, 0.1, material("Plane tire", PALETTE["ink"]), vertices=12, rot=(math.pi / 2, 0, 0), parent=plane)
-        segment(f"PlaneStrut_{side}", (0.9, side * 0.62, 3.46), (0.9, side * 0.66, 3.08), 0.035, metal, parent=plane)
+def make_plane(parent: bpy.types.Object) -> bpy.types.Object:
+    plane, imported = import_glb_group(
+        LICENSED_MODEL_DIR / "small-airplane.glb",
+        "PlaneRig",
+        parent,
+        target_size=4.75,
+        location=(1.25, 0, 3.55),
+        fit="span",
+        center_location=True,
+        rotation=(0, -0.04, -0.05),
+    )
+    propeller = next((obj for obj in imported if obj.name.startswith("Propeller_Cone")), None)
+    if propeller:
+        propeller.name = "Propeller"
     return plane
 
 
@@ -695,8 +796,8 @@ def build_demo() -> bpy.types.Object:
         angle = index * 2.3
         radius = 3.1 + (index % 4) * 0.22
         ico(f"DemoRock_{index}", (math.cos(angle) * radius, math.sin(angle) * radius * 0.68, 0.32), (0.2 + index % 3 * 0.08, 0.22, 0.18), sand, subdivisions=1, rot=(angle, 0.3, angle * 0.5), parent=root)
-    make_excavator(root)
-    make_plane(root)
+    _, arm = make_excavator(root)
+    make_plane(arm)
     return root
 
 
@@ -792,7 +893,11 @@ SCENES = [
 ]
 
 
+requested_scenes = {arg.lower() for arg in sys.argv[sys.argv.index("--") + 1 :]} if "--" in sys.argv else set()
+
 for name, builder, camera_location, camera_target, accent in SCENES:
+    if requested_scenes and name not in requested_scenes:
+        continue
     reset_scene()
     root_object = builder()
     set_render(name, camera_location, camera_target, accent)

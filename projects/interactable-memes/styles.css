@@ -70,7 +70,7 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
 .meme-comparison { display: grid; grid-template-columns: minmax(300px, .84fr) minmax(430px, 1.16fr); gap: clamp(15px, 2.1vw, 32px); align-items: stretch; max-width: 1440px; margin: 0 auto; }
 .reference-card, .machine { min-width: 0; margin: 0; border: 1px solid var(--ink); background: var(--paper); color: var(--ink); }
 .reference-card { box-shadow: 11px 12px 0 rgba(17,17,15,.38); transform: rotate(-.45deg); }
-.machine { box-shadow: 16px 17px 0 var(--ink); transform: rotate(.45deg); }
+.machine { position: relative; box-shadow: 16px 17px 0 var(--ink); transform: rotate(.45deg); }
 .compare-label { min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 0 13px; border-bottom: 1px solid currentColor; background: var(--paper); font: 900 9px/1.2 "Courier New", monospace; letter-spacing: .08em; }
 .compare-label span:last-child { color: var(--orange); text-align: right; }
 .reference-media { position: relative; height: clamp(390px, 43vw, 650px); display: grid; place-items: center; overflow: hidden; padding: clamp(10px, 1.5vw, 20px); background: #0b0b0d; }
@@ -94,6 +94,26 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
 .webgl-fallback i::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--load-progress); background: var(--acid); box-shadow: 0 0 14px var(--acid); transition: width 180ms ease; }
 .diorama-stage.is-ready .webgl-fallback { opacity: 0; transform: translate(-50%, 7px); }
 .diorama-stage.is-error .diorama-hint { display: none; }
+
+.scene-meme-copy { position: absolute; z-index: 4; inset: 52px 0 44px; overflow: hidden; pointer-events: none; }
+.scene-meme-copy-reactor strong, .scene-meme-copy-demo strong {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  color: white;
+  font: 1000 clamp(19px, 2.15vw, 38px)/.92 Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+  letter-spacing: .012em;
+  text-align: center;
+  text-wrap: balance;
+  -webkit-text-stroke: 1.4px #000;
+  text-shadow: 2px 2px 0 #000, -1px -1px 0 #000;
+}
+.scene-meme-copy-reactor strong:first-child, .scene-meme-copy-demo strong:first-child { top: 14px; }
+.scene-meme-copy-reactor strong:last-child, .scene-meme-copy-demo strong:last-child { bottom: 16px; }
+.scene-meme-copy-brain { padding: 14px 16px; color: #070707; font-family: Georgia, "Times New Roman", serif; }
+.scene-meme-copy-brain::before { content: ""; position: absolute; z-index: -1; inset: 0 0 auto; height: 42%; background: rgba(255,255,255,.91); box-shadow: 0 5px 18px rgba(0,0,0,.22); }
+.scene-meme-copy-brain strong { display: block; font-size: clamp(13px, 1.45vw, 24px); line-height: 1.08; }
+.scene-meme-copy-brain b { position: absolute; right: 10px; bottom: 16px; left: 10px; color: white; font: 900 clamp(14px, 1.75vw, 28px)/1 Arial, sans-serif; text-align: center; -webkit-text-stroke: 1px #111; text-shadow: 2px 2px 0 #111; }
 
 .room-standoff { --room-accent: #d8ff38; }
 .room-standoff .room-copy h2 em { color: var(--room-accent); }

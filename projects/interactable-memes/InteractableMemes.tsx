@@ -4,11 +4,11 @@ import Image from "next/image";
 import { useState } from "react";
 import { MemeDiorama } from "./MemeDiorama";
 
-const levels = ["DORMANT", "SUSPICIOUS", "GLOWING", "DINOSAUR"];
+const levels = ["NOTICED", "EYE CONTACT", "AWKWARD", "VERY AWKWARD"];
 const reactions = [
   "BRAIN: No.",
   "BRAIN: Fine, but make it dramatic.",
-  "BRAIN: You son of a bitch, I’m in.",
+  "BRAIN: You son of a bitch, I'm in.",
   "BRAIN: We have learned absolutely nothing.",
 ];
 const demoStates = [
@@ -89,7 +89,7 @@ export default function InteractableMemes() {
           <div className="room-copy">
             <p className="room-index">01 / OFFICE CROSSFIRE</p>
             <h2>Finger guns.<br /><em>Real depth.</em></h2>
-            <p>The original frame stays intact on the left. On the right, a complete Blender-modeled office turns every accusatory hand into a moving 3D prop.</p>
+            <p>The flat stand-ins are gone. The remake now uses four skinned anatomical hand meshes and a rigged, properly proportioned businessman in a real suit.</p>
           </div>
           <div className="scoreboard" aria-live="polite"><span>SHOTS FIRED</span><strong>{String(shotCount).padStart(2, "0")}</strong></div>
         </div>
@@ -128,18 +128,22 @@ export default function InteractableMemes() {
       <section className="meme-room room-reactor" id="reactor" data-room="03">
         <div className="room-heading">
           <div className="room-copy">
-            <p className="room-index">03 / EFFORT REACTOR</p>
-            <h2>Try your<br /><em>absolute best.</em></h2>
-            <p>The gorilla, T‑Rex, rocks, smoke, teeth, and radioactive core are separate Blender objects. Orbit them to inspect exactly how bad the situation is.</p>
+            <p className="room-index">03 / AWKWARD STAREDOWN</p>
+            <h2>Try your best.<br /><em>Avoid eye contact.</em></h2>
+            <p>No glowing core and no invented reactor. Just the actual gorilla and T‑Rex meshes locked in the deeply uncomfortable eye contact the joke deserves.</p>
           </div>
-          <button className="reactor-trigger" type="button" onClick={() => setReactorLevel((level) => (level + 1) % levels.length)}>PUSH FOR MORE EFFORT <span>＋</span></button>
+          <button className="reactor-trigger" type="button" onClick={() => setReactorLevel((level) => (level + 1) % levels.length)}>MAKE THE STARE WEIRDER <span>＋</span></button>
         </div>
         <div className="meme-comparison">
-          <MemeReference src="/interactable-memes/source/radioactive-dinosaur.png" alt="Original gorilla radioactive dinosaur meme" width={720} height={463} index="03" note="THE ORIGINAL WARNING / HE WILL TRY HIS BEST" />
+          <MemeReference src="/interactable-memes/source/radioactive-dinosaur.png" alt="Original gorilla radioactive dinosaur meme" width={720} height={463} index="03" note="GUYS I'M GONNA TRY MY BEST / BUT IT'S A F*CKING RADIOACTIVE DINOSAUR" />
           <div className={`machine machine-reactor reactor-level-${reactorLevel}`}>
             <div className="compare-label"><span>INTERACTIVE 3D REMAKE</span><span>{levels[reactorLevel]}</span></div>
-            <MemeDiorama variant="reactor" accent="#b7ff2f" motion={reactorLevel} ariaLabel={`3D radioactive dinosaur reactor at ${levels[reactorLevel]} level. Drag to orbit and tap to escalate.`} onAction={() => setReactorLevel((level) => (level + 1) % levels.length)} />
-            <p className="machine-tip">CORE STATUS / {levels[reactorLevel]} · TAP TO ESCALATE</p>
+            <div className="scene-meme-copy scene-meme-copy-reactor" aria-hidden="true">
+              <strong>GUYS I'M GONNA TRY MY BEST</strong>
+              <strong>BUT IT'S A F*CKING RADIOACTIVE DINOSAUR</strong>
+            </div>
+            <MemeDiorama variant="reactor" accent="#b7ff2f" motion={reactorLevel} ariaLabel={`3D gorilla and dinosaur stare-down at ${levels[reactorLevel]} level. Drag to orbit and tap to intensify the eye contact.`} onAction={() => setReactorLevel((level) => (level + 1) % levels.length)} />
+            <p className="machine-tip">STARE STATUS / {levels[reactorLevel]} · TAP TO MAKE IT WORSE</p>
           </div>
         </div>
       </section>
@@ -157,9 +161,16 @@ export default function InteractableMemes() {
           </div>
         </div>
         <div className="meme-comparison">
-          <MemeReference src="/interactable-memes/source/brain-pill.png" alt="Original brain and pill cartoon meme" width={500} height={488} index="04" note="THE ORIGINAL DECISION / MEDICALLY QUESTIONABLE" />
+          <MemeReference src="/interactable-memes/source/brain-pill.png" alt="Original brain and pill cartoon meme" width={500} height={488} index="04" note={'Me: "heal my disease" / Brain: "No" / Me: *takes pill with no effect* / Brain:'} />
           <div className={`machine machine-brain dose-${Math.min(pillDoses, 3)}`}>
             <div className="compare-label"><span>INTERACTIVE 3D REMAKE</span><span>{pillDoses} DOSE{pillDoses === 1 ? "" : "S"}</span></div>
+            <div className="scene-meme-copy scene-meme-copy-brain" aria-hidden="true">
+              <strong>{'Me: "heal my disease"'}</strong>
+              <strong>{'Brain: "No"'}</strong>
+              <strong>Me: *takes pill with no effect*</strong>
+              <strong>Brain:</strong>
+              <b>You son of a bitch, I'm in</b>
+            </div>
             <MemeDiorama variant="brain" accent="#ff3158" motion={pillDoses} ariaLabel="3D brain and pill chamber. Drag to orbit and tap to take another pill." onAction={() => setPillDoses((dose) => dose + 1)} />
             <p className="machine-tip">TAP TO PRESCRIBE · EYES FOLLOW POINTER · PILLS HAVE GRAVITY-ISH</p>
           </div>
@@ -171,7 +182,7 @@ export default function InteractableMemes() {
           <div className="room-copy">
             <p className="room-index">05 / CLIENT DEMO STABILIZER</p>
             <h2>Product not ready.<br /><em>Client is.</em></h2>
-            <p>A custom prop plane balances on a fully modeled excavator rig. Tap to increase panic while the boom, propeller, and aircraft fight the laws of demos.</p>
+            <p>The licensed airplane is physically cradled in the excavator bucket. The boom now carries it, swings it, and spins the whole product demo around.</p>
           </div>
           <div className="demo-controls">
             <button className="demo-trigger" type="button" onClick={() => setDemoLevel((level) => (level + 1) % demoStates.length)}>SHIP THE DEMO ANYWAY <span>↗</span></button>
@@ -179,11 +190,15 @@ export default function InteractableMemes() {
           </div>
         </div>
         <div className="meme-comparison">
-          <MemeReference src="/interactable-memes/source/client-demo.png" alt="Original excavator holding an airplane meme" width={1453} height={1094} index="05" note="THE ORIGINAL WORKAROUND / PLEASE DO NOT ASK QUESTIONS" />
+          <MemeReference src="/interactable-memes/source/client-demo.png" alt="Original excavator holding an airplane meme" width={1453} height={1094} index="05" note="WHEN CLIENT WANTS DEMO / BUT PRODUCT ISN'T READY" />
           <div className={`machine machine-demo demo-level-${demoLevel}`}>
             <div className="compare-label"><span>INTERACTIVE 3D REMAKE</span><span>{12 + demoLevel * 22}% STABLE</span></div>
-            <MemeDiorama variant="demo" accent="#ffcc22" motion={demoLevel} ariaLabel="3D excavator holding up an airplane. Drag to orbit and tap to make the client demo shakier." onAction={() => setDemoLevel((level) => (level + 1) % demoStates.length)} />
-            <p className="machine-tip">DRAG FOR PROOF · TAP FOR CONFIDENCE · NEVER REFRESH</p>
+            <div className="scene-meme-copy scene-meme-copy-demo" aria-hidden="true">
+              <strong>WHEN CLIENT WANTS DEMO</strong>
+              <strong>BUT PRODUCT ISN'T READY</strong>
+            </div>
+            <MemeDiorama variant="demo" accent="#ffcc22" motion={demoLevel} ariaLabel="3D excavator gripping and spinning an airplane. Drag to orbit and tap to spin the client demo faster." onAction={() => setDemoLevel((level) => (level + 1) % demoStates.length)} />
+            <p className="machine-tip">EXCAVATOR GRIP: LOCKED · TAP TO SPIN THE DEMO FASTER</p>
           </div>
         </div>
       </section>

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import test from "node:test";
 
 async function render() {
@@ -36,7 +36,7 @@ test("server-renders the interactable memes experience", async () => {
   assert.match(html, /The original joke, now with polygons/);
   assert.match(html, /OFFICE CROSSFIRE/);
   assert.match(html, /VINYL PURR-SUASION/);
-  assert.match(html, /EFFORT REACTOR/);
+  assert.match(html, /AWKWARD STAREDOWN/);
   assert.match(html, /PLACEBO PROTOCOL/);
   assert.match(html, /CLIENT DEMO STABILIZER/);
   assert.match(html, /THREE\.JS/);
@@ -48,6 +48,13 @@ test("server-renders the interactable memes experience", async () => {
   assert.match(html, /radioactive-dinosaur\.png/);
   assert.match(html, /brain-pill\.png/);
   assert.match(html, /client-demo\.png/);
+  assert.match(html, /GUYS I&#x27;M GONNA TRY MY BEST/);
+  assert.match(html, /BUT IT&#x27;S A F\*CKING RADIOACTIVE DINOSAUR/);
+  assert.match(html, /heal my disease/);
+  assert.match(html, /takes pill with no effect/);
+  assert.match(html, /You son of a bitch, I(?:&#x27;|')m in/);
+  assert.match(html, /WHEN CLIENT WANTS DEMO/);
+  assert.match(html, /BUT PRODUCT ISN&#x27;T READY/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
@@ -72,6 +79,21 @@ test("ships the five Blender-authored dioramas and their rendered loading poster
     assert.ok(statSync(model).size > 10_000, `${scene}.glb is unexpectedly small`);
     assert.ok(statSync(preview).size > 10_000, `${scene}.png is unexpectedly small`);
   }
+});
+
+test("uses the production meshes and keeps the gorilla scene core-free", () => {
+  const directory = new URL("../public/interactable-memes/studio-models/", import.meta.url);
+  const crossfire = readFileSync(new URL("crossfire.glb", directory)).toString("latin1");
+  const reactor = readFileSync(new URL("reactor.glb", directory)).toString("latin1");
+  const demo = readFileSync(new URL("demo.glb", directory)).toString("latin1");
+
+  assert.match(crossfire, /Suit_Body/);
+  assert.match(crossfire, /handMeshNode/);
+  assert.match(reactor, /Geo_Gorilla/);
+  assert.match(reactor, /TrexStareEye/);
+  assert.doesNotMatch(reactor, /ReactorCore|CoreCrystal|CoreRing/);
+  assert.match(demo, /Fuselage_Cube/);
+  assert.match(demo, /ExcavatorArm/);
 });
 
 test("ships absolute social preview metadata", async () => {
