@@ -33,6 +33,14 @@ test("server-renders the interactable memes experience", async () => {
   assert.match(html, /CAN TOUCH\./);
   assert.match(html, /REMIX MEME/);
   assert.match(html, /A tiny experiment in serious nonsense/);
+  assert.match(html, /OFFICE CROSSFIRE/);
+  assert.match(html, /VINYL PURR-SUASION/);
+  assert.match(html, /EFFORT REACTOR/);
+  assert.match(html, /PLACEBO PROTOCOL/);
+  assert.match(html, /finger-guns\.png/);
+  assert.match(html, /dj-cat\.png/);
+  assert.match(html, /radioactive-dinosaur\.png/);
+  assert.match(html, /brain-pill\.png/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
@@ -40,6 +48,6 @@ test("ships absolute social preview metadata", async () => {
   const response = await render();
   const html = await response.text();
 
-  assert.match(html, /property="og:image" content="http:\/\/localhost:3000\/interactable-memes\/og\.png"/i);
+  assert.match(html, /property="og:image" content="http:\/\/localhost:3000\/interactable-memes\/og-v2\.png"/i);
   assert.match(html, /name="twitter:card" content="summary_large_image"/i);
 });
