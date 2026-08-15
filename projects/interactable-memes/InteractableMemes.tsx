@@ -77,19 +77,19 @@ export default function InteractableMemes() {
         <div className="hero-copy">
           <p className="eyebrow"><span>LIVE 3D</span> The original joke, now with polygons</p>
           <h1>THE MEME.<br /><em>THEN THE WORLD.</em></h1>
-          <p className="intro">See every source image beside its interactive low-poly remake. Same punchline. More shadows, motion, creatures, machinery, and unnecessary depth.</p>
+          <p className="intro">See every source image beside its Blender-built low-poly remake. Same punchline. Studio lighting, named moving parts, real shadows, and unnecessary depth.</p>
           <a className="enter-button" href="#standoff">COMPARE THE FIRST MEME <span>↓</span></a>
         </div>
         <div className="hero-target-note"><span>3D ART DIRECTION</span><strong>THIS ENERGY → EVERY SCENE</strong></div>
         <div className="hero-footer" aria-hidden="true"><span>ORIGINAL / 3D / INTERACTIVE</span><span>DRAG · TAP · MAKE THE JOKE WORSE</span></div>
       </section>
 
-      <section className="meme-room room-standoff" id="standoff">
+      <section className="meme-room room-standoff" id="standoff" data-room="01">
         <div className="room-heading">
           <div className="room-copy">
             <p className="room-index">01 / OFFICE CROSSFIRE</p>
             <h2>Finger guns.<br /><em>Real depth.</em></h2>
-            <p>The original frame stays intact on the left. On the right, the suited character and every accusatory hand occupy real 3D space.</p>
+            <p>The original frame stays intact on the left. On the right, a complete Blender-modeled office turns every accusatory hand into a moving 3D prop.</p>
           </div>
           <div className="scoreboard" aria-live="polite"><span>SHOTS FIRED</span><strong>{String(shotCount).padStart(2, "0")}</strong></div>
         </div>
@@ -98,17 +98,17 @@ export default function InteractableMemes() {
           <div className="machine machine-standoff">
             <div className="compare-label"><span>INTERACTIVE 3D REMAKE</span><span>01B / ARMED</span></div>
             <MemeDiorama variant="crossfire" accent="#d8ff38" motion={shotCount} ariaLabel="3D finger-gun standoff. Drag to orbit and tap to fire." onAction={() => setShotCount((count) => count + 1)} />
-            <p className="machine-tip">DRAG TO ORBIT · TAP TO FIRE · SUIT MODEL IS FULLY ANIMATED</p>
+            <p className="machine-tip">DRAG TO ORBIT · TAP TO FIRE · 100% BLENDER-BUILT DIORAMA</p>
           </div>
         </div>
       </section>
 
-      <section className="meme-room room-scratch" id="scratch">
+      <section className="meme-room room-scratch" id="scratch" data-room="02">
         <div className="room-heading">
           <div className="room-copy">
             <p className="room-index">02 / VINYL PURR-SUASION</p>
             <h2>Scratch the<br /><em>cat-alogue.</em></h2>
-            <p>The reference cat becomes a shaded low-poly DJ with animated ears, glasses, decks, speakers, and a physical equalizer.</p>
+            <p>The reference cat becomes a custom low-poly DJ with pixel shades, articulated paws, twin decks, speakers, brickwork, and a physical equalizer.</p>
           </div>
           <div className="dj-controls">
             <button type="button" onClick={() => setIsPlaying((playing) => !playing)}>{isPlaying ? "PAUSE SET Ⅱ" : "PLAY SET ▶"}</button>
@@ -125,12 +125,12 @@ export default function InteractableMemes() {
         </div>
       </section>
 
-      <section className="meme-room room-reactor" id="reactor">
+      <section className="meme-room room-reactor" id="reactor" data-room="03">
         <div className="room-heading">
           <div className="room-copy">
             <p className="room-index">03 / EFFORT REACTOR</p>
             <h2>Try your<br /><em>absolute best.</em></h2>
-            <p>The gorilla, T‑Rex, rocks, captions, and radioactive core are separate lit objects. Orbit them to inspect exactly how bad the situation is.</p>
+            <p>The gorilla, T‑Rex, rocks, smoke, teeth, and radioactive core are separate Blender objects. Orbit them to inspect exactly how bad the situation is.</p>
           </div>
           <button className="reactor-trigger" type="button" onClick={() => setReactorLevel((level) => (level + 1) % levels.length)}>PUSH FOR MORE EFFORT <span>＋</span></button>
         </div>
@@ -144,12 +144,12 @@ export default function InteractableMemes() {
         </div>
       </section>
 
-      <section className="meme-room room-brain" id="brain">
+      <section className="meme-room room-brain" id="brain" data-room="04">
         <div className="room-heading">
           <div className="room-copy">
             <p className="room-index">04 / PLACEBO PROTOCOL</p>
             <h2>Ask brain.<br /><em>Ignore brain.</em></h2>
-            <p>The flat cartoon becomes a complete low-poly decision chamber with two characters, expressive eyes, floating pills, and one unhelpful brain.</p>
+            <p>The flat cartoon becomes a portal-lit decision chamber with two modeled characters, expressive eyes, floating capsules, and one unhelpful brain.</p>
           </div>
           <div className="brain-controls">
             <button className="pill-button" type="button" onClick={() => setPillDoses((dose) => dose + 1)}>TAKE PILL <span>CAPSULE {String(pillDoses + 1).padStart(2, "0")}</span></button>
@@ -166,12 +166,12 @@ export default function InteractableMemes() {
         </div>
       </section>
 
-      <section className="meme-room room-demo" id="demo">
+      <section className="meme-room room-demo" id="demo" data-room="05">
         <div className="room-heading">
           <div className="room-copy">
             <p className="room-index">05 / CLIENT DEMO STABILIZER</p>
             <h2>Product not ready.<br /><em>Client is.</em></h2>
-            <p>The new prop-plane asset sits on a fully modeled excavator rig. Tap to increase panic while the boom and aircraft fight the laws of demos.</p>
+            <p>A custom prop plane balances on a fully modeled excavator rig. Tap to increase panic while the boom, propeller, and aircraft fight the laws of demos.</p>
           </div>
           <div className="demo-controls">
             <button className="demo-trigger" type="button" onClick={() => setDemoLevel((level) => (level + 1) % demoStates.length)}>SHIP THE DEMO ANYWAY <span>↗</span></button>
@@ -192,10 +192,10 @@ export default function InteractableMemes() {
         <p className="manifesto-index">06 / FIELD NOTES</p>
         <h2>The reference stays visible.<br /><span>The 3D joke has to earn it.</span></h2>
         <div className="manifesto-grid">
-          <p>Every room now makes the comparison explicit: the supplied meme on one side, its real-time low-poly reconstruction on the other. No pretending a textured screenshot is a 3D character.</p>
-          <p className="aside-copy">BUILT WITH THREE.JS + GLB<br />POINTERS + TOUCHSCREENS WELCOME<br /><strong>DEPTH: FINALLY OBVIOUS</strong></p>
+          <p>Every room keeps the supplied meme visible beside its real-time reconstruction. The models, sets, props, and rendered loading posters all come from the same Blender art pipeline.</p>
+          <p className="aside-copy">MODELED IN BLENDER · EXPORTED AS GLB<br />ANIMATED WITH THREE.JS<br />POINTERS + TOUCHSCREENS WELCOME<br /><strong>DEPTH: FINALLY OBVIOUS</strong></p>
         </div>
-        <p className="asset-credits">3D assets: <a href="https://poly.pizza/m/JFrLIKqvCH">Business Man</a>, <a href="https://poly.pizza/m/qKICY6xla2">Cat</a>, and <a href="https://poly.pizza/m/UYtneO5FpF">T‑Rex</a> by Quaternius (CC0); <a href="https://poly.pizza/m/bmfQ1j9CeO2">Gorilla</a> by Poly by Google and <a href="https://poly.pizza/m/7cvx6ex-xfL">Small Airplane</a> by Vojtěch Balák (CC BY 3.0). Other characters, hands, sets, and machinery modeled in Three.js.</p>
+        <p className="asset-credits">All five interactive dioramas are original low-poly assets modeled and rendered in Blender, then exported as optimized GLB scenes with named parts for live browser animation.</p>
         <a className="back-to-top" href="#top">RUN THE COMPARISON AGAIN ↑</a>
       </footer>
     </main>

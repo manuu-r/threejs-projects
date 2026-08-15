@@ -60,10 +60,24 @@ test("ships the licensed 3D character models used by the meme scenes", () => {
   }
 });
 
+test("ships the five Blender-authored dioramas and their rendered loading posters", () => {
+  const modelDirectory = new URL("../public/interactable-memes/studio-models/", import.meta.url);
+  const previewDirectory = new URL("../public/interactable-memes/studio-previews/", import.meta.url);
+
+  for (const scene of ["crossfire", "scratch", "reactor", "brain", "demo"]) {
+    const model = new URL(`${scene}.glb`, modelDirectory);
+    const preview = new URL(`${scene}.png`, previewDirectory);
+    assert.equal(existsSync(model), true, `${scene}.glb is missing`);
+    assert.equal(existsSync(preview), true, `${scene}.png is missing`);
+    assert.ok(statSync(model).size > 10_000, `${scene}.glb is unexpectedly small`);
+    assert.ok(statSync(preview).size > 10_000, `${scene}.png is unexpectedly small`);
+  }
+});
+
 test("ships absolute social preview metadata", async () => {
   const response = await render();
   const html = await response.text();
 
-  assert.match(html, /property="og:image" content="http:\/\/localhost:3000\/interactable-memes\/og-v4\.png"/i);
+  assert.match(html, /property="og:image" content="http:\/\/localhost:3000\/interactable-memes\/og-v5\.png"/i);
   assert.match(html, /name="twitter:card" content="summary_large_image"/i);
 });

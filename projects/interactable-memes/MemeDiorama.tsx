@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import Image from "next/image";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 export type DioramaVariant = "crossfire" | "scratch" | "reactor" | "brain" | "demo";
 
@@ -17,356 +18,138 @@ type MemeDioramaProps = {
   onDragStart?: () => void;
 };
 
+type LoadState = {
+  status: "loading" | "ready" | "error";
+  progress: number;
+};
+
 type SceneActors = {
-  bars: THREE.Mesh[];
-  hands: THREE.Group[];
-  pills: THREE.Group[];
-  clouds: THREE.Group[];
-  officeCharacter?: THREE.Group;
-  cat?: THREE.Group;
-  gorilla?: THREE.Group;
-  trex?: THREE.Group;
-  boy?: THREE.Group;
-  boyArm?: THREE.Group;
-  scientist?: THREE.Group;
-  brain?: THREE.Group;
-  platters: THREE.Mesh[];
-  reactor?: THREE.Group;
-  plane?: THREE.Group;
-  excavator?: THREE.Group;
-  excavatorArm?: THREE.Group;
-  businessShoot?: THREE.AnimationAction;
-  trexAttack?: THREE.AnimationAction;
+  hands: THREE.Object3D[];
+  platters: THREE.Object3D[];
+  bars: THREE.Object3D[];
+  pills: THREE.Object3D[];
+  portalRings: THREE.Object3D[];
+  smoke: THREE.Object3D[];
+  officeHero?: THREE.Object3D;
+  cat?: THREE.Object3D;
+  gorilla?: THREE.Object3D;
+  trex?: THREE.Object3D;
+  reactor?: THREE.Object3D;
+  morty?: THREE.Object3D;
+  mortyArm?: THREE.Object3D;
+  rick?: THREE.Object3D;
+  brain?: THREE.Object3D;
+  plane?: THREE.Object3D;
+  propeller?: THREE.Object3D;
+  excavatorArm?: THREE.Object3D;
 };
 
-const MODEL_URLS = {
-  business: "/interactable-memes/models/business-man.glb",
-  cat: "/interactable-memes/models/cat.glb",
-  gorilla: "/interactable-memes/models/gorilla.glb",
-  trex: "/interactable-memes/models/trex.glb",
-  airplane: "/interactable-memes/models/small-airplane.glb",
+const SCENE_URLS: Record<DioramaVariant, string> = {
+  crossfire: "/interactable-memes/studio-models/crossfire.glb",
+  scratch: "/interactable-memes/studio-models/scratch.glb",
+  reactor: "/interactable-memes/studio-models/reactor.glb",
+  brain: "/interactable-memes/studio-models/brain.glb",
+  demo: "/interactable-memes/studio-models/demo.glb",
 };
 
-function material(color: THREE.ColorRepresentation, emissive = 0, roughness = 0.58) {
-  return new THREE.MeshStandardMaterial({
-    color,
-    emissive: emissive ? color : 0x000000,
-    emissiveIntensity: emissive,
-    metalness: 0.12,
-    roughness,
-    flatShading: true,
+const POSTER_URLS: Record<DioramaVariant, string> = {
+  crossfire: "/interactable-memes/studio-previews/crossfire.png",
+  scratch: "/interactable-memes/studio-previews/scratch.png",
+  reactor: "/interactable-memes/studio-previews/reactor.png",
+  brain: "/interactable-memes/studio-previews/brain.png",
+  demo: "/interactable-memes/studio-previews/demo.png",
+};
+
+const BACKGROUNDS: Record<DioramaVariant, number> = {
+  crossfire: 0x080909,
+  scratch: 0x09050f,
+  reactor: 0x070b05,
+  brain: 0x031015,
+  demo: 0x100a03,
+};
+
+function namedChildren(root: THREE.Object3D, prefix: string) {
+  const found: THREE.Object3D[] = [];
+  root.traverse((object) => {
+    if (object.name.startsWith(prefix)) found.push(object);
   });
+  return found;
 }
 
-function addMesh(
-  parent: THREE.Object3D,
-  geometry: THREE.BufferGeometry,
-  surface: THREE.Material,
-  position: [number, number, number],
-  rotation: [number, number, number] = [0, 0, 0],
-  scale: [number, number, number] = [1, 1, 1],
-) {
-  const object = new THREE.Mesh(geometry, surface);
-  object.position.set(...position);
-  object.rotation.set(...rotation);
-  object.scale.set(...scale);
-  object.castShadow = true;
-  object.receiveShadow = true;
-  parent.add(object);
-  return object;
+function rememberTransform(object?: THREE.Object3D) {
+  if (!object) return;
+  object.userData.basePosition = object.position.clone();
+  object.userData.baseRotation = object.rotation.clone();
+  object.userData.baseScale = object.scale.clone();
 }
 
-function setModelShadows(object: THREE.Object3D) {
-  object.traverse((child) => {
-    if (child instanceof THREE.Mesh) {
-      child.castShadow = true;
-      child.receiveShadow = true;
-      const surfaces = Array.isArray(child.material) ? child.material : [child.material];
-      surfaces.forEach((surface) => {
-        if (surface instanceof THREE.MeshStandardMaterial) {
-          surface.flatShading = true;
-          surface.needsUpdate = true;
-        }
+function basePosition(object: THREE.Object3D) {
+  return object.userData.basePosition as THREE.Vector3;
+}
+
+function baseRotation(object: THREE.Object3D) {
+  return object.userData.baseRotation as THREE.Euler;
+}
+
+function baseScale(object: THREE.Object3D) {
+  return object.userData.baseScale as THREE.Vector3;
+}
+
+function collectActors(asset: THREE.Object3D): SceneActors {
+  const actors: SceneActors = {
+    hands: namedChildren(asset, "FingerGun_").filter((object) => /^FingerGun_\d+$/.test(object.name)),
+    platters: [asset.getObjectByName("Platter_L"), asset.getObjectByName("Platter_R")].filter(Boolean) as THREE.Object3D[],
+    bars: namedChildren(asset, "EQ_"),
+    pills: namedChildren(asset, "Pill_").filter((object) => /^Pill_\d+$/.test(object.name)),
+    portalRings: namedChildren(asset, "PortalRing_"),
+    smoke: namedChildren(asset, "Smoke_"),
+    officeHero: asset.getObjectByName("OfficeHero"),
+    cat: asset.getObjectByName("DJCat"),
+    gorilla: asset.getObjectByName("Gorilla"),
+    trex: asset.getObjectByName("Trex"),
+    reactor: asset.getObjectByName("ReactorCore"),
+    morty: asset.getObjectByName("Morty"),
+    mortyArm: asset.getObjectByName("MortyPointArm"),
+    rick: asset.getObjectByName("Rick"),
+    brain: asset.getObjectByName("Brain"),
+    plane: asset.getObjectByName("PlaneRig"),
+    propeller: asset.getObjectByName("Propeller"),
+    excavatorArm: asset.getObjectByName("ExcavatorArm"),
+  };
+
+  Object.values(actors).forEach((entry) => {
+    if (Array.isArray(entry)) entry.forEach((object) => rememberTransform(object));
+    else rememberTransform(entry);
+  });
+  return actors;
+}
+
+function fitAsset(asset: THREE.Object3D, hero: boolean) {
+  asset.updateMatrixWorld(true);
+  const initial = new THREE.Box3().setFromObject(asset);
+  const size = initial.getSize(new THREE.Vector3());
+  const targetWidth = hero ? 8.25 : 7.8;
+  const targetHeight = hero ? 5.15 : 4.95;
+  const scale = Math.min(targetWidth / Math.max(size.x, 0.01), targetHeight / Math.max(size.y, 0.01));
+  asset.scale.setScalar(scale);
+  asset.updateMatrixWorld(true);
+  const fitted = new THREE.Box3().setFromObject(asset);
+  const center = fitted.getCenter(new THREE.Vector3());
+  asset.position.set(-center.x, -center.y - 0.05, -center.z);
+}
+
+function disposeObject(root: THREE.Object3D) {
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    object.geometry.dispose();
+    const surfaces = Array.isArray(object.material) ? object.material : [object.material];
+    surfaces.forEach((surface) => {
+      Object.values(surface).forEach((value) => {
+        if (value instanceof THREE.Texture) value.dispose();
       });
-    }
+      surface.dispose();
+    });
   });
-}
-
-function normalizeModel(object: THREE.Object3D, targetHeight: number) {
-  const initial = new THREE.Box3().setFromObject(object);
-  const size = initial.getSize(new THREE.Vector3());
-  const scale = targetHeight / Math.max(size.y, 0.001);
-  object.scale.setScalar(scale);
-  const fitted = new THREE.Box3().setFromObject(object);
-  const center = fitted.getCenter(new THREE.Vector3());
-  object.position.x -= center.x;
-  object.position.y -= fitted.min.y;
-  object.position.z -= center.z;
-}
-
-function normalizeModelSpan(object: THREE.Object3D, targetSpan: number) {
-  const initial = new THREE.Box3().setFromObject(object);
-  const size = initial.getSize(new THREE.Vector3());
-  const scale = targetSpan / Math.max(size.x, size.y, size.z, 0.001);
-  object.scale.setScalar(scale);
-  const fitted = new THREE.Box3().setFromObject(object);
-  const center = fitted.getCenter(new THREE.Vector3());
-  object.position.sub(center);
-}
-
-function addCatGlasses(parent: THREE.Object3D) {
-  const glasses = new THREE.Group();
-  const black = material(0x080808, 0.02, 0.18);
-  const white = material(0xffffff, 0.18, 0.2);
-  for (const x of [-0.27, 0.27]) {
-    addMesh(glasses, new THREE.BoxGeometry(0.42, 0.24, 0.08), black, [x, 0, 0]);
-    addMesh(glasses, new THREE.BoxGeometry(0.12, 0.045, 0.012), white, [x - 0.06, 0.03, 0.049], [0, 0, -.38]);
-  }
-  addMesh(glasses, new THREE.BoxGeometry(0.18, 0.055, 0.065), black, [0, 0.01, 0]);
-  glasses.position.set(0, 1.62, 0.55);
-  parent.add(glasses);
-}
-
-function addSpeaker(parent: THREE.Object3D, x: number) {
-  const speaker = new THREE.Group();
-  addMesh(speaker, new THREE.BoxGeometry(1.1, 2.15, .58), material(0x14131a, 0, .3), [0, 0, 0]);
-  for (const y of [-.53, .48]) {
-    addMesh(speaker, new THREE.CylinderGeometry(.34, .34, .08, 20), material(0x272331, 0, .24), [0, y, .34], [Math.PI / 2, 0, 0]);
-    addMesh(speaker, new THREE.CylinderGeometry(.12, .12, .09, 16), material(0x7756ff, .3, .22), [0, y, .39], [Math.PI / 2, 0, 0]);
-  }
-  speaker.position.set(x, -.25, -1.48);
-  parent.add(speaker);
-}
-
-function makeTextPanel(text: string, width: number, height: number, accent: string, inverse = false) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 1024;
-  canvas.height = Math.max(192, Math.round((height / width) * 1024));
-  const context = canvas.getContext("2d");
-  if (!context) return new THREE.Group();
-
-  context.fillStyle = inverse ? "#11110f" : "#f0ede4";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.strokeStyle = accent;
-  context.lineWidth = 24;
-  context.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
-  context.fillStyle = inverse ? "#f0ede4" : "#11110f";
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.font = `900 ${Math.min(122, canvas.height * 0.35)}px Arial`;
-  const lines = text.split("\n");
-  lines.forEach((line, index) => {
-    const lineHeight = canvas.height / (lines.length + 0.3);
-    context.fillText(line, canvas.width / 2, lineHeight * (index + 0.68), canvas.width - 72);
-  });
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  const group = new THREE.Group();
-  const back = addMesh(group, new THREE.BoxGeometry(width, height, 0.09), material(inverse ? 0x11110f : 0xf0ede4), [0, 0, 0]);
-  const face = addMesh(group, new THREE.PlaneGeometry(width - 0.06, height - 0.06), new THREE.MeshBasicMaterial({ map: texture }), [0, 0, 0.051]);
-  back.userData.generatedTexture = texture;
-  face.userData.generatedTexture = texture;
-  return group;
-}
-
-function makeFingerGun(skin: THREE.Material, sleeve: THREE.Material, side: 1 | -1) {
-  const hand = new THREE.Group();
-  const arm = addMesh(hand, new THREE.CapsuleGeometry(0.2, 1.15, 6, 12), sleeve, [-side * 0.82, 0, 0], [0, 0, Math.PI / 2]);
-  const palm = addMesh(hand, new THREE.BoxGeometry(0.58, 0.42, 0.3), skin, [0, 0, 0]);
-  const index = addMesh(hand, new THREE.CapsuleGeometry(0.11, 0.88, 6, 12), skin, [side * 0.62, 0.12, 0], [0, 0, Math.PI / 2]);
-  const thumb = addMesh(hand, new THREE.CapsuleGeometry(0.1, 0.42, 6, 12), skin, [side * 0.18, 0.4, 0], [0, 0, side * 0.68]);
-  arm.castShadow = palm.castShadow = index.castShadow = thumb.castShadow = true;
-  hand.rotation.z = side === 1 ? 0 : Math.PI;
-  return hand;
-}
-
-function makeCapsule(upper = 0xef334e, lower = 0xf8f3e8) {
-  const capsule = new THREE.Group();
-  addMesh(capsule, new THREE.CapsuleGeometry(0.13, 0.19, 5, 12), material(upper, 0.06), [0, 0.14, 0]);
-  addMesh(capsule, new THREE.CapsuleGeometry(0.13, 0.19, 5, 12), material(lower), [0, -0.14, 0]);
-  return capsule;
-}
-
-function makeEye(parent: THREE.Object3D, x: number, y: number, z: number, scale = 1) {
-  addMesh(parent, new THREE.SphereGeometry(0.22 * scale, 20, 16), material(0xffffff), [x, y, z], [0, 0, 0], [1, 1.1, 0.5]);
-  return addMesh(parent, new THREE.SphereGeometry(0.075 * scale, 16, 12), material(0x101010), [x, y, z + 0.12 * scale]);
-}
-
-function makeCartoonBoy(actors: SceneActors) {
-  const boy = new THREE.Group();
-  const skin = material(0xf3bd7b);
-  const yellow = material(0xf5dc3f);
-  const denim = material(0x4f72b8);
-  const red = material(0xc73343);
-  addMesh(boy, new THREE.SphereGeometry(0.58, 24, 18), skin, [0, 1.85, 0]);
-  const leftPupil = makeEye(boy, -0.22, 1.95, 0.48, 1.05);
-  const rightPupil = makeEye(boy, 0.22, 1.95, 0.48, 1.05);
-  boy.userData.pupils = [leftPupil, rightPupil];
-  for (let index = 0; index < 9; index += 1) {
-    const hair = addMesh(boy, new THREE.SphereGeometry(0.23, 12, 8), material(0x6d381f), [-0.42 + (index % 4) * 0.28, 2.28 + Math.floor(index / 4) * 0.12, -0.05], [0, 0, 0], [1, 0.65, 0.72]);
-    hair.rotation.z = index * 0.2;
-  }
-  addMesh(boy, new THREE.BoxGeometry(0.82, 1.05, 0.46), yellow, [0, 0.86, 0]);
-  addMesh(boy, new THREE.BoxGeometry(0.88, 0.48, 0.5), denim, [0, 0.17, 0]);
-  addMesh(boy, new THREE.BoxGeometry(0.78, 1.12, 0.25), red, [0, 0.92, -0.34]);
-  const leftLeg = addMesh(boy, new THREE.CapsuleGeometry(0.16, 0.62, 6, 12), skin, [-0.23, -0.45, 0]);
-  const rightLeg = addMesh(boy, new THREE.CapsuleGeometry(0.16, 0.62, 6, 12), skin, [0.23, -0.45, 0]);
-  leftLeg.rotation.z = 0.04;
-  rightLeg.rotation.z = -0.04;
-  const leftArm = new THREE.Group();
-  addMesh(leftArm, new THREE.CapsuleGeometry(0.14, 0.85, 6, 12), skin, [0, -0.42, 0]);
-  leftArm.position.set(-0.52, 1.2, 0.05);
-  leftArm.rotation.z = 1.13;
-  boy.add(leftArm);
-  const pointFinger = addMesh(leftArm, new THREE.CapsuleGeometry(0.065, 0.44, 5, 10), skin, [-0.2, -0.88, 0], [0, 0, Math.PI / 2]);
-  pointFinger.rotation.z = Math.PI / 2;
-  const rightArm = addMesh(boy, new THREE.CapsuleGeometry(0.14, 0.84, 6, 12), skin, [0.55, 0.85, 0], [0, 0, -0.16]);
-  rightArm.rotation.z = -0.15;
-  actors.boy = boy;
-  actors.boyArm = leftArm;
-  return boy;
-}
-
-function makeScientist(actors: SceneActors) {
-  const scientist = new THREE.Group();
-  const skin = material(0xeab47b);
-  const white = material(0xf4f2e8);
-  const cyan = material(0x93e4e8);
-  addMesh(scientist, new THREE.SphereGeometry(0.48, 24, 18), skin, [0, 2.3, 0]);
-  makeEye(scientist, -0.18, 2.4, 0.4, 0.88);
-  makeEye(scientist, 0.18, 2.4, 0.4, 0.88);
-  for (let index = 0; index < 10; index += 1) {
-    addMesh(scientist, new THREE.ConeGeometry(0.2, 0.72, 8), material(0x9bc7d8), [-0.52 + index * 0.115, 2.82 + Math.sin(index) * 0.1, -0.05], [0, 0, -0.9 + index * 0.2]);
-  }
-  addMesh(scientist, new THREE.BoxGeometry(1.05, 1.5, 0.45), white, [0, 1.1, 0]);
-  addMesh(scientist, new THREE.BoxGeometry(0.58, 1.25, 0.48), cyan, [0, 1.18, 0.04]);
-  addMesh(scientist, new THREE.CapsuleGeometry(0.16, 1.15, 6, 12), white, [-0.68, 1.05, 0], [0, 0, 0.12]);
-  addMesh(scientist, new THREE.CapsuleGeometry(0.16, 1.15, 6, 12), white, [0.68, 1.05, 0], [0, 0, -0.12]);
-  addMesh(scientist, new THREE.CapsuleGeometry(0.18, 0.9, 6, 12), material(0x503a2a), [-0.28, -0.03, 0]);
-  addMesh(scientist, new THREE.CapsuleGeometry(0.18, 0.9, 6, 12), material(0x503a2a), [0.28, -0.03, 0]);
-  actors.scientist = scientist;
-  return scientist;
-}
-
-function makeBrain() {
-  const brain = new THREE.Group();
-  const pink = material(0xef6b8a, 0.22);
-  for (let index = 0; index < 13; index += 1) {
-    const lobe = addMesh(brain, new THREE.SphereGeometry(0.24, 14, 10), pink, [((index % 4) - 1.5) * 0.28, (Math.floor(index / 4) - 1) * 0.22, (index % 2) * 0.13]);
-    lobe.scale.set(1, 0.72, 0.78);
-  }
-  return brain;
-}
-
-function makeTurntable(parent: THREE.Object3D, x: number, accent: string) {
-  const turntable = new THREE.Group();
-  addMesh(turntable, new THREE.BoxGeometry(2.2, 0.35, 1.7), material(0x202124, 0, 0.35), [0, 0, 0]);
-  const disc = addMesh(turntable, new THREE.CylinderGeometry(0.68, 0.68, 0.08, 48), material(0x080808, 0.08, 0.28), [0, 0.23, 0], [Math.PI / 2, 0, 0]);
-  addMesh(turntable, new THREE.CylinderGeometry(0.16, 0.16, 0.1, 24), material(accent, 0.32), [0, 0.29, 0], [Math.PI / 2, 0, 0]);
-  addMesh(turntable, new THREE.BoxGeometry(0.06, 0.06, 1.05), material(0xd8d5ca, 0.08, 0.3), [0.73, 0.35, 0.06], [0, 0.36, 0]);
-  turntable.position.set(x, -1.22, 0.25);
-  parent.add(turntable);
-  return { turntable, disc };
-}
-
-function makeAirplane() {
-  const plane = new THREE.Group();
-  const white = material(0xf8f8f3, 0.04, 0.35);
-  const stripe = material(0x27303d, 0.04, 0.3);
-  const metal = material(0xbfc4c8, 0.08, 0.25);
-  const body = addMesh(plane, new THREE.CapsuleGeometry(0.3, 3.3, 12, 24), white, [0, 0, 0], [0, 0, Math.PI / 2]);
-  body.scale.z = 0.84;
-  addMesh(plane, new THREE.BoxGeometry(1.35, 0.1, 2.4), white, [0.2, -0.02, 0], [0, -0.08, 0]);
-  addMesh(plane, new THREE.BoxGeometry(0.72, 0.72, 0.09), white, [-1.65, 0.35, 0], [0, 0, -0.08]);
-  addMesh(plane, new THREE.BoxGeometry(1.5, 0.11, 0.95), white, [-1.42, 0.04, 0]);
-  addMesh(plane, new THREE.BoxGeometry(2.6, 0.08, 0.16), stripe, [0.1, 0.11, 0.26]);
-  for (let index = 0; index < 12; index += 1) addMesh(plane, new THREE.SphereGeometry(0.045, 10, 8), material(0x161d28, 0.08), [-1.05 + index * 0.2, 0.18, 0.29]);
-  for (const z of [-0.68, 0.68]) {
-    addMesh(plane, new THREE.CapsuleGeometry(0.15, 0.48, 6, 12), metal, [0.45, -0.25, z], [0, 0, Math.PI / 2]);
-  }
-  return plane;
-}
-
-function makeExcavator(actors: SceneActors) {
-  const rig = new THREE.Group();
-  const yellow = material(0xe4a51c, 0.04, 0.42);
-  const dark = material(0x292724, 0, 0.3);
-  const glass = new THREE.MeshPhysicalMaterial({ color: 0x83c4dc, transparent: true, opacity: 0.72, roughness: 0.18, metalness: 0.1 });
-  for (const z of [-0.55, 0.55]) {
-    addMesh(rig, new THREE.BoxGeometry(1.9, 0.48, 0.42), dark, [0, 0, z]);
-    for (let index = 0; index < 5; index += 1) addMesh(rig, new THREE.CylinderGeometry(0.18, 0.18, 0.08, 16), material(0x515151), [-0.65 + index * 0.32, 0, z * 1.05], [Math.PI / 2, 0, 0]);
-  }
-  addMesh(rig, new THREE.BoxGeometry(1.35, 0.64, 1.05), yellow, [-0.15, 0.58, 0]);
-  addMesh(rig, new THREE.BoxGeometry(0.72, 0.65, 0.82), glass, [0.18, 1.02, 0]);
-  const armPivot = new THREE.Group();
-  addMesh(armPivot, new THREE.BoxGeometry(2.85, 0.26, 0.34), yellow, [1.33, 0, 0]);
-  const forearmPivot = new THREE.Group();
-  addMesh(forearmPivot, new THREE.BoxGeometry(1.7, 0.23, 0.32), yellow, [0.76, 0, 0]);
-  const bucket = addMesh(forearmPivot, new THREE.BoxGeometry(0.6, 0.62, 0.64), dark, [1.62, -0.22, 0], [0, 0, -0.25]);
-  bucket.scale.set(1, 1, 1.1);
-  forearmPivot.position.set(2.65, 0, 0);
-  forearmPivot.rotation.z = -0.52;
-  armPivot.add(forearmPivot);
-  armPivot.position.set(0.2, 1.05, 0);
-  armPivot.rotation.z = 0.58;
-  rig.add(armPivot);
-  actors.excavatorArm = armPivot;
-  return rig;
-}
-
-function addOffice(root: THREE.Group) {
-  const beige = material(0xb5a58f, 0, 0.78);
-  const charcoal = material(0x262525, 0, 0.6);
-  addMesh(root, new THREE.BoxGeometry(10, 5.8, 0.16), beige, [0, 0.65, -2.25]);
-  for (const x of [-2.7, 2.7]) {
-    addMesh(root, new THREE.BoxGeometry(2.45, 2.45, 0.1), material(0x3d444a, 0.04), [x, 0.85, -2.12]);
-    for (let index = 0; index < 12; index += 1) addMesh(root, new THREE.BoxGeometry(2.3, 0.045, 0.05), material(0xc8c2b5), [x, -0.2 + index * 0.18, -2.02]);
-  }
-  for (let index = 0; index < 5; index += 1) {
-    const chair = new THREE.Group();
-    addMesh(chair, new THREE.BoxGeometry(0.85, 0.14, 0.72), charcoal, [0, 0.35, 0]);
-    addMesh(chair, new THREE.BoxGeometry(0.85, 0.85, 0.14), charcoal, [0, 0.85, -0.3], [-0.1, 0, 0]);
-    addMesh(chair, new THREE.CylinderGeometry(0.055, 0.055, 0.75, 10), charcoal, [-0.32, -0.04, 0.25]);
-    addMesh(chair, new THREE.CylinderGeometry(0.055, 0.055, 0.75, 10), charcoal, [0.32, -0.04, 0.25]);
-    chair.position.set(-3.2 + index * 1.6, -2.05, -1.35);
-    root.add(chair);
-  }
-}
-
-function addBrickWall(root: THREE.Group) {
-  const mortar = material(0xc7a77f, 0, 0.86);
-  addMesh(root, new THREE.BoxGeometry(10, 5.7, 0.16), material(0x916849, 0, 0.86), [0, 0.6, -2.3]);
-  for (let row = 0; row < 12; row += 1) {
-    for (let column = 0; column < 12; column += 1) {
-      const x = -4.9 + column * 0.9 + (row % 2) * 0.45;
-      addMesh(root, new THREE.BoxGeometry(0.79, 0.3, 0.08), mortar, [x, -1.1 + row * 0.38, -2.17]);
-    }
-  }
-}
-
-function addZoo(root: THREE.Group) {
-  addMesh(root, new THREE.BoxGeometry(10, 0.22, 7), material(0x49853c, 0, 0.9), [0, -2.05, -0.25]);
-  for (let index = 0; index < 12; index += 1) {
-    const rock = addMesh(root, new THREE.DodecahedronGeometry(0.38 + (index % 3) * 0.13, 0), material(0x7d7468), [-4.4 + index * 0.82, -1.75 + (index % 2) * 0.1, -1.8 + (index % 4) * 0.3]);
-    rock.scale.y = 0.62;
-  }
-}
-
-function addRunway(root: THREE.Group, actors: SceneActors) {
-  addMesh(root, new THREE.BoxGeometry(12, 0.18, 8), material(0x8b8e91, 0, 0.9), [0, -2.12, -0.3]);
-  for (let index = 0; index < 8; index += 1) addMesh(root, new THREE.BoxGeometry(0.1, 0.03, 0.82), material(0xf0ede4), [-4.2 + index * 1.2, -1.99, 0.1]);
-  for (let index = 0; index < 7; index += 1) {
-    const cloud = new THREE.Group();
-    for (let puff = 0; puff < 5; puff += 1) addMesh(cloud, new THREE.SphereGeometry(0.34 + (puff % 2) * 0.12, 14, 10), material(0xffffff, 0, 0.92), [(puff - 2) * 0.38, Math.sin(puff) * 0.12, 0]);
-    cloud.position.set(-5 + index * 1.7, 2.2 + (index % 2) * 0.48, -2.1);
-    root.add(cloud);
-    actors.clouds.push(cloud);
-  }
-}
-
-function findClip(gltf: GLTF, needle: string) {
-  return gltf.animations.find((clip) => clip.name.includes(needle));
 }
 
 export function MemeDiorama({
@@ -384,6 +167,7 @@ export function MemeDiorama({
   const dragStartRef = useRef(onDragStart);
   const stateRef = useRef({ motion, speed });
   const labelRef = useRef(ariaLabel);
+  const [loadState, setLoadState] = useState<LoadState>({ status: "loading", progress: 0 });
 
   useEffect(() => { actionRef.current = onAction; }, [onAction]);
   useEffect(() => { dragStartRef.current = onDragStart; }, [onDragStart]);
@@ -396,257 +180,124 @@ export function MemeDiorama({
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
+    setLoadState({ status: "loading", progress: 0 });
 
     let renderer: THREE.WebGLRenderer;
     try {
-      renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
     } catch {
+      setLoadState({ status: "error", progress: 0 });
       return;
     }
 
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.65));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.08;
+    renderer.toneMappingExposure = 1.12;
     renderer.domElement.className = "diorama-canvas";
     renderer.domElement.tabIndex = 0;
     renderer.domElement.setAttribute("role", "button");
     renderer.domElement.setAttribute("aria-label", labelRef.current);
     mount.appendChild(renderer.domElement);
 
-    const backgrounds: Record<DioramaVariant, number> = {
-      crossfire: 0x171513,
-      scratch: 0x120c20,
-      reactor: 0x12180c,
-      brain: 0x07191e,
-      demo: 0x181208,
-    };
+    const background = BACKGROUNDS[variant];
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(backgrounds[variant]);
-    scene.fog = new THREE.Fog(backgrounds[variant], 10, 18);
+    scene.background = new THREE.Color(background);
+    scene.fog = new THREE.FogExp2(background, 0.055);
     const camera = new THREE.PerspectiveCamera(hero ? 34 : 38, 1, 0.1, 100);
-    camera.position.set(0, hero ? 0.25 : 0.15, hero ? 8.9 : 8.2);
+    camera.position.set(0, 0.1, hero ? 9.2 : 8.65);
 
-    scene.add(new THREE.HemisphereLight(0xfff7e9, 0x17131f, 1.65));
-    const key = new THREE.DirectionalLight(0xffffff, 5.2);
-    key.position.set(-4, 7, 6);
+    scene.add(new THREE.HemisphereLight(0xfff4df, 0x10101a, 2.3));
+    const key = new THREE.DirectionalLight(0xfff6e7, 5.5);
+    key.position.set(-4.2, 6.5, 6.5);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
+    key.shadow.camera.left = -7;
+    key.shadow.camera.right = 7;
+    key.shadow.camera.top = 7;
+    key.shadow.camera.bottom = -7;
     scene.add(key);
-    const rim = new THREE.PointLight(new THREE.Color(accent), 36, 13);
-    rim.position.set(4.3, 1.4, 3.5);
+    const rim = new THREE.PointLight(new THREE.Color(accent), 54, 15, 1.7);
+    rim.position.set(4.2, 2.3, 4.5);
     scene.add(rim);
-    const fill = new THREE.PointLight(0x7d66ff, 18, 10);
-    fill.position.set(-4, -0.5, 3);
+    const fill = new THREE.PointLight(0x7448ff, 32, 13, 1.8);
+    fill.position.set(-4.5, -1.4, 4.2);
     scene.add(fill);
 
-    const root = new THREE.Group();
-    scene.add(root);
-    const actors: SceneActors = { bars: [], hands: [], pills: [], clouds: [], platters: [] };
-    const mixers: THREE.AnimationMixer[] = [];
-    const generatedTextures: THREE.Texture[] = [];
+    const orbitRoot = new THREE.Group();
+    scene.add(orbitRoot);
+    const modelRoot = new THREE.Group();
+    orbitRoot.add(modelRoot);
     const loader = new GLTFLoader();
+    let actors: SceneActors | null = null;
+    let asset: THREE.Object3D | null = null;
     let disposed = false;
-
-    const floor = addMesh(root, new THREE.PlaneGeometry(12, 9), new THREE.ShadowMaterial({ color: 0x11110f, opacity: 0.28 }), [0, -2.18, 0], [-Math.PI / 2, 0, 0]);
-    floor.receiveShadow = true;
-    const grid = new THREE.GridHelper(12, 24, new THREE.Color(accent), 0x3d3d3d);
-    grid.position.y = -2.16;
-    grid.material.transparent = true;
-    grid.material.opacity = 0.26;
-    root.add(grid);
-
-    function addPanel(text: string, width: number, height: number, position: [number, number, number], rotation: [number, number, number] = [0, 0, 0], inverse = false) {
-      const panel = makeTextPanel(text, width, height, accent, inverse);
-      panel.position.set(...position);
-      panel.rotation.set(...rotation);
-      panel.traverse((object) => {
-        const texture = object.userData.generatedTexture as THREE.Texture | undefined;
-        if (texture && !generatedTextures.includes(texture)) generatedTextures.push(texture);
-      });
-      root.add(panel);
-      return panel;
-    }
-
-    async function loadCharacter(url: string, targetSize: number, position: [number, number, number], rotationY = 0, fit: "height" | "span" = "height") {
-      const gltf = await loader.loadAsync(url);
-      if (disposed) {
-        gltf.scene.traverse((object) => {
-          if (object instanceof THREE.Mesh) object.geometry.dispose();
-        });
-        return null;
-      }
-      const wrapper = new THREE.Group();
-      if (fit === "span") normalizeModelSpan(gltf.scene, targetSize);
-      else normalizeModel(gltf.scene, targetSize);
-      setModelShadows(gltf.scene);
-      wrapper.add(gltf.scene);
-      wrapper.position.set(...position);
-      wrapper.rotation.y = rotationY;
-      root.add(wrapper);
-      return { wrapper, gltf };
-    }
-
-    if (variant === "crossfire") {
-      addOffice(root);
-      addPanel("OFFICE CROSSFIRE", 3.1, 0.56, [0, 2.48, -1.65], [0, 0, -0.025], true);
-      const skin = material(0xd5a27d);
-      const sleeve = material(0xe8e5dc);
-      const handPositions: Array<[number, number, number, 1 | -1, number]> = [
-        [-3.05, 1.1, 0.6, 1, -0.08], [3.0, 0.95, 0.7, -1, 0.1], [-3.0, -0.75, 0.85, 1, 0.14], [3.05, -0.95, 0.9, -1, -0.12],
-      ];
-      handPositions.forEach(([x, y, z, side, tilt]) => {
-        const hand = makeFingerGun(skin, sleeve, side);
-        hand.position.set(x, y, z);
-        hand.rotation.z += tilt;
-        root.add(hand);
-        actors.hands.push(hand);
-      });
-      void loadCharacter(MODEL_URLS.business, 3.65, [0, -2.12, 0.05]).then((loaded) => {
-        if (!loaded) return;
-        actors.officeCharacter = loaded.wrapper;
-        const mixer = new THREE.AnimationMixer(loaded.gltf.scene);
-        mixers.push(mixer);
-        const idle = findClip(loaded.gltf, "Idle_Gun_Pointing") ?? findClip(loaded.gltf, "Idle_Neutral");
-        const shoot = findClip(loaded.gltf, "Idle_Gun_Shoot") ?? findClip(loaded.gltf, "Gun_Shoot");
-        if (idle) mixer.clipAction(idle).play();
-        if (shoot) {
-          actors.businessShoot = mixer.clipAction(shoot);
-          actors.businessShoot.setLoop(THREE.LoopOnce, 1);
-          actors.businessShoot.clampWhenFinished = false;
-        }
-      });
-    }
-
-    if (variant === "scratch") {
-      addBrickWall(root);
-      addPanel("DJ CAT / LIVE", 2.55, 0.52, [0, 2.45, -1.7], [0, 0, 0.02], true);
-      addSpeaker(root, -3.2);
-      addSpeaker(root, 3.2);
-      const left = makeTurntable(root, -1.23, accent);
-      const right = makeTurntable(root, 1.23, accent);
-      actors.platters.push(left.disc, right.disc);
-      for (let index = 0; index < 13; index += 1) {
-        const bar = addMesh(root, new THREE.BoxGeometry(0.22, 0.55, 0.2), material(accent, 0.34), [-2.55 + index * 0.43, 1.85, -1.75]);
-        actors.bars.push(bar);
-      }
-      void loadCharacter(MODEL_URLS.cat, 2.25, [0, -0.95, 0.1], 0).then((loaded) => {
-        if (!loaded) return;
-        actors.cat = loaded.wrapper;
-        addCatGlasses(loaded.wrapper);
-        const mixer = new THREE.AnimationMixer(loaded.gltf.scene);
-        mixers.push(mixer);
-        const headbutt = findClip(loaded.gltf, "Headbutt") ?? findClip(loaded.gltf, "Idle");
-        if (headbutt) mixer.clipAction(headbutt).play();
-      });
-    }
-
-    if (variant === "reactor") {
-      addZoo(root);
-      addPanel("GUYS I'M GONNA TRY MY BEST", 4.65, 0.58, [0, 2.45, -1.65], [0, 0, -0.018]);
-      addPanel("BUT IT'S A RADIOACTIVE DINOSAUR", 5.25, 0.62, [0, -1.72, 1.25], [0.32, 0, 0.012], true);
-      const reactor = new THREE.Group();
-      const core = addMesh(reactor, new THREE.IcosahedronGeometry(0.43, 2), material(accent, 0.7, 0.22), [0, 0, 0]);
-      for (let index = 0; index < 3; index += 1) addMesh(reactor, new THREE.TorusGeometry(0.68 + index * 0.2, 0.035, 8, 48), material(accent, 0.45), [0, 0, 0], [index * 0.68, index * 0.45, index * 0.82]);
-      reactor.position.set(0.15, -0.2, 0.55);
-      reactor.userData.core = core;
-      root.add(reactor);
-      actors.reactor = reactor;
-      void loadCharacter(MODEL_URLS.gorilla, 2.6, [-1.7, -2.05, 0.05], -0.28).then((loaded) => { if (loaded) actors.gorilla = loaded.wrapper; });
-      void loadCharacter(MODEL_URLS.trex, 2.85, [1.75, -2.04, -0.15], 0.22).then((loaded) => {
-        if (!loaded) return;
-        actors.trex = loaded.wrapper;
-        const mixer = new THREE.AnimationMixer(loaded.gltf.scene);
-        mixers.push(mixer);
-        const idle = findClip(loaded.gltf, "TRex_Idle");
-        const attack = findClip(loaded.gltf, "TRex_Attack");
-        if (idle) mixer.clipAction(idle).play();
-        if (attack) {
-          actors.trexAttack = mixer.clipAction(attack);
-          actors.trexAttack.setLoop(THREE.LoopOnce, 1);
-        }
-      });
-    }
-
-    if (variant === "brain") {
-      addMesh(root, new THREE.BoxGeometry(10, 5.8, 0.15), material(0xa7bcbd, 0, 0.82), [0, 0.55, -2.25]);
-      addMesh(root, new THREE.BoxGeometry(10, 0.2, 7), material(0x71868b, 0, 0.82), [0, -2.08, -0.2]);
-      addPanel("ME: HEAL MY DISEASE\nBRAIN: NO", 3.65, 1.05, [-1.15, 2.22, -1.65], [0, 0.06, -0.035]);
-      const boy = makeCartoonBoy(actors);
-      boy.position.set(-0.85, -1.42, 0.3);
-      root.add(boy);
-      const scientist = makeScientist(actors);
-      scientist.position.set(1.25, -1.65, -0.15);
-      scientist.scale.setScalar(1.08);
-      root.add(scientist);
-      const brain = makeBrain();
-      brain.position.set(2.5, 1.65, 0.4);
-      brain.scale.setScalar(0.78);
-      root.add(brain);
-      actors.brain = brain;
-      for (let index = 0; index < 11; index += 1) {
-        const pill = makeCapsule();
-        pill.position.set(-3.4 + (index % 6) * 1.25, 2.9 + Math.floor(index / 6) * 0.62, -0.2 + (index % 3) * 0.3);
-        pill.rotation.set(index * 0.24, index * 0.31, index * 0.46);
-        pill.userData.originY = pill.position.y;
-        pill.userData.offset = index * 0.66;
-        root.add(pill);
-        actors.pills.push(pill);
-      }
-    }
-
-    if (variant === "demo") {
-      addRunway(root, actors);
-      addPanel("CLIENT WANTS A DEMO", 3.45, 0.58, [-1.15, 2.45, -1.5], [0, 0.05, -0.025]);
-      addPanel("PRODUCT ISN'T READY", 3.55, 0.58, [1.2, -1.55, 1.45], [0.32, -0.05, 0.02], true);
-      const excavator = makeExcavator(actors);
-      excavator.position.set(-2.05, -2.02, 0.05);
-      excavator.scale.setScalar(0.78);
-      root.add(excavator);
-      actors.excavator = excavator;
-      const plane = makeAirplane();
-      plane.position.set(1.55, 0.18, 0.2);
-      plane.rotation.set(0.02, -0.18, -0.12);
-      plane.scale.setScalar(0.92);
-      root.add(plane);
-      actors.plane = plane;
-      void loadCharacter(MODEL_URLS.airplane, 4.5, [1.55, 0.25, 0.2], Math.PI / 2, "span").then((loaded) => {
-        if (!loaded) return;
-        plane.visible = false;
-        loaded.wrapper.rotation.x = 0.06;
-        loaded.wrapper.rotation.z = -0.12;
-        actors.plane = loaded.wrapper;
-      });
-    }
-
-    let targetX = hero ? -0.04 : -0.08;
-    let targetY = hero ? -0.26 : -0.08;
+    let visible = true;
+    let frame = 0;
+    let targetX = hero ? -0.05 : -0.08;
+    let targetY = hero ? -0.24 : -0.12;
     let currentX = targetX;
     let currentY = targetY;
     let dragging = false;
     let dragged = false;
     let lastX = 0;
     let lastY = 0;
-    let pointerX = 0;
-    let pointerY = 0;
     let impact = 0;
     let scratchVelocity = 0;
-    let pillDrop = 0;
     let previousMotion = stateRef.current.motion;
-    let frame = 0;
-    let visible = true;
     const timer = new THREE.Timer();
     timer.connect(document);
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    loader.load(
+      SCENE_URLS[variant],
+      (gltf) => {
+        if (disposed) {
+          disposeObject(gltf.scene);
+          return;
+        }
+        asset = gltf.scene;
+        asset.name = `${variant}-blender-diorama`;
+        asset.traverse((object) => {
+          if (!(object instanceof THREE.Mesh)) return;
+          object.castShadow = true;
+          object.receiveShadow = true;
+          const surfaces = Array.isArray(object.material) ? object.material : [object.material];
+          surfaces.forEach((surface) => {
+            if (surface instanceof THREE.MeshStandardMaterial) {
+              surface.flatShading = true;
+              surface.needsUpdate = true;
+            }
+          });
+        });
+        fitAsset(asset, hero);
+        modelRoot.add(asset);
+        actors = collectActors(asset);
+        setLoadState({ status: "ready", progress: 100 });
+      },
+      (event) => {
+        if (!event.total || disposed) return;
+        setLoadState({ status: "loading", progress: Math.min(99, Math.round((event.loaded / event.total) * 100)) });
+      },
+      () => {
+        if (!disposed) setLoadState({ status: "error", progress: 0 });
+      },
+    );
 
     function resize() {
       const width = mount.clientWidth;
       const height = mount.clientHeight;
       renderer.setSize(width, height, false);
       camera.aspect = width / Math.max(height, 1);
-      camera.position.z = width < 560 ? (hero ? 10.5 : 9.8) : (hero ? 8.9 : 8.2);
+      camera.position.z = width < 560 ? (hero ? 10.8 : 10.1) : (hero ? 9.2 : 8.65);
       camera.updateProjectionMatrix();
+    }
+
+    function activate() {
+      impact = 1;
+      actionRef.current?.();
     }
 
     function onPointerDown(event: PointerEvent) {
@@ -659,24 +310,15 @@ export function MemeDiorama({
     }
 
     function onPointerMove(event: PointerEvent) {
-      const rect = renderer.domElement.getBoundingClientRect();
-      pointerX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      pointerY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       if (!dragging) return;
       const dx = event.clientX - lastX;
       const dy = event.clientY - lastY;
       if (Math.abs(dx) + Math.abs(dy) > 4) dragged = true;
       targetY += dx * 0.006;
-      targetX = THREE.MathUtils.clamp(targetX + dy * 0.0045, -0.5, 0.5);
-      scratchVelocity += dx * 0.018;
+      targetX = THREE.MathUtils.clamp(targetX + dy * 0.0045, -0.48, 0.48);
+      scratchVelocity += dx * 0.014;
       lastX = event.clientX;
       lastY = event.clientY;
-    }
-
-    function activate() {
-      impact = 1;
-      pillDrop = 1;
-      actionRef.current?.();
     }
 
     function onPointerUp(event: PointerEvent) {
@@ -697,7 +339,75 @@ export function MemeDiorama({
       }
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault();
-        targetY += event.key === "ArrowLeft" ? -0.2 : 0.2;
+        targetY += event.key === "ArrowLeft" ? -0.22 : 0.22;
+      }
+    }
+
+    function animateScratch(elapsed: number, delta: number, live: { motion: number; speed: number }) {
+      if (!actors) return;
+      actors.platters.forEach((platter) => {
+        platter.rotation.y += live.motion ? delta * (2.4 + live.speed / 32) + scratchVelocity : scratchVelocity;
+      });
+      actors.bars.forEach((bar, index) => {
+        const base = baseScale(bar);
+        bar.scale.y = base.y * (0.35 + Math.abs(Math.sin(elapsed * (2.3 + live.speed / 85) + index * 0.61)) * (live.motion ? 1.5 : 0.18));
+      });
+      if (actors.cat) {
+        const base = baseRotation(actors.cat);
+        actors.cat.rotation.z = base.z + Math.sin(elapsed * (live.motion ? 3.1 : 0.8)) * (live.motion ? 0.065 : 0.014);
+      }
+    }
+
+    function animateActors(elapsed: number, delta: number) {
+      if (!actors || reducedMotion) return;
+      const live = stateRef.current;
+      if (variant === "crossfire") {
+        actors.hands.forEach((hand, index) => {
+          const base = basePosition(hand);
+          hand.position.z = base.z + Math.sin(elapsed * 1.7 + index) * 0.045 + impact * 0.32;
+          hand.rotation.y = baseRotation(hand).y + Math.sin(elapsed * 0.8 + index) * 0.04;
+        });
+        if (actors.officeHero) actors.officeHero.rotation.z = baseRotation(actors.officeHero).z + Math.sin(elapsed * 1.1) * 0.012 - impact * 0.045;
+      }
+      if (variant === "scratch") animateScratch(elapsed, delta, live);
+      if (variant === "reactor") {
+        const power = Math.min(live.motion, 3);
+        if (actors.reactor) {
+          actors.reactor.rotation.y += delta * (0.65 + power * 0.5);
+          const base = baseScale(actors.reactor);
+          const pulse = 1 + power * 0.06 + Math.sin(elapsed * (2.2 + power)) * 0.04 + impact * 0.08;
+          actors.reactor.scale.set(base.x * pulse, base.y * pulse, base.z * pulse);
+        }
+        if (actors.gorilla) actors.gorilla.rotation.z = baseRotation(actors.gorilla).z + Math.sin(elapsed * (1.1 + power * 0.4)) * (0.012 + power * 0.014);
+        if (actors.trex) actors.trex.rotation.z = baseRotation(actors.trex).z + Math.sin(elapsed * 1.35) * 0.018 - impact * 0.055;
+        actors.smoke.forEach((puff, index) => {
+          puff.position.y = basePosition(puff).y + Math.sin(elapsed * 0.9 + index * 0.7) * 0.07;
+        });
+        rim.intensity = 40 + power * 12 + impact * 18;
+      }
+      if (variant === "brain") {
+        actors.portalRings.forEach((ring, index) => {
+          ring.rotation.z = baseRotation(ring).z + elapsed * (index % 2 ? -0.12 : 0.09);
+        });
+        actors.pills.forEach((pill, index) => {
+          const base = basePosition(pill);
+          pill.position.y = base.y + Math.sin(elapsed * 1.4 + index * 0.63) * 0.12 - (impact > 0.08 && index === live.motion % Math.max(actors.pills.length, 1) ? (1 - impact) * 2.6 : 0);
+          pill.rotation.x = baseRotation(pill).x + elapsed * (0.35 + index * 0.018);
+          pill.rotation.z = baseRotation(pill).z + elapsed * 0.28;
+        });
+        if (actors.brain) actors.brain.rotation.y = baseRotation(actors.brain).y + elapsed * 0.32;
+        if (actors.mortyArm) actors.mortyArm.rotation.z = baseRotation(actors.mortyArm).z + Math.sin(elapsed * 1.4) * 0.05 + impact * 0.24;
+        if (actors.rick) actors.rick.rotation.z = baseRotation(actors.rick).z + Math.sin(elapsed * 0.8) * 0.012;
+      }
+      if (variant === "demo") {
+        const panic = Math.min(live.motion, 4);
+        if (actors.propeller) actors.propeller.rotation.x = baseRotation(actors.propeller).x + elapsed * (3.8 + panic * 1.4);
+        if (actors.plane) {
+          const base = basePosition(actors.plane);
+          actors.plane.position.y = base.y + Math.sin(elapsed * (1.5 + panic * 0.25)) * (0.025 + panic * 0.018);
+          actors.plane.rotation.z = baseRotation(actors.plane).z + Math.sin(elapsed * 1.3) * (0.018 + panic * 0.018) + impact * 0.08;
+        }
+        if (actors.excavatorArm) actors.excavatorArm.rotation.z = baseRotation(actors.excavatorArm).z + Math.sin(elapsed * 1.05) * 0.014 + panic * 0.008 + impact * 0.04;
       }
     }
 
@@ -708,87 +418,21 @@ export function MemeDiorama({
       const elapsed = timer.getElapsed();
       const delta = Math.min(timer.getDelta(), 0.05);
       const live = stateRef.current;
-      mixers.forEach((mixer) => mixer.update(delta));
-      currentX = THREE.MathUtils.lerp(currentX, targetX, dragging ? 0.16 : 0.065);
-      currentY = THREE.MathUtils.lerp(currentY, targetY, dragging ? 0.16 : 0.065);
-      impact *= 0.9;
-      scratchVelocity *= 0.935;
-      pillDrop *= 0.965;
-      root.rotation.set(currentX + Math.sin(elapsed * 0.65) * 0.012, currentY, Math.sin(elapsed * 0.52) * 0.008 + impact * 0.025);
-      root.position.y = Math.sin(elapsed * 0.82) * 0.025;
-
       if (live.motion !== previousMotion) {
         previousMotion = live.motion;
-        if (variant === "crossfire" && actors.businessShoot) actors.businessShoot.reset().fadeIn(0.05).play();
-        if (variant === "reactor" && actors.trexAttack) actors.trexAttack.reset().fadeIn(0.08).play();
-        if (variant === "brain") pillDrop = 1;
+        impact = 1;
       }
-
-      if (variant === "crossfire") {
-        actors.hands.forEach((hand, index) => {
-          hand.position.z = 0.62 + Math.sin(elapsed * 1.9 + index) * 0.06 + impact * 0.55;
-          hand.rotation.y = Math.sin(elapsed * 0.8 + index) * 0.06;
-        });
-        if (actors.officeCharacter) actors.officeCharacter.rotation.z = Math.sin(elapsed * 1.2) * 0.012 - impact * 0.04;
-      }
-
-      if (variant === "scratch") {
-        actors.platters.forEach((disc) => {
-          disc.rotation.y += (live.motion ? live.speed / 1200 : 0) + scratchVelocity;
-        });
-        actors.bars.forEach((bar, index) => { bar.scale.y = 0.35 + Math.abs(Math.sin(elapsed * (2 + live.speed / 95) + index * 0.7)) * (live.motion ? 1.65 : 0.15); });
-        if (actors.cat) {
-          actors.cat.rotation.z = Math.sin(elapsed * (live.motion ? 3.2 : 0.7)) * (live.motion ? 0.08 : 0.018);
-          actors.cat.position.y = -0.95 + Math.abs(Math.sin(elapsed * 2.2)) * (live.motion ? 0.11 : 0.02);
-        }
-      }
-
-      if (variant === "reactor") {
-        const power = Math.min(live.motion, 3);
-        if (actors.reactor) {
-          actors.reactor.rotation.x += delta * (0.45 + power * 0.35);
-          actors.reactor.rotation.y += delta * (0.72 + power * 0.5);
-          actors.reactor.scale.setScalar(0.8 + power * 0.18 + Math.sin(elapsed * (2 + power)) * 0.05);
-        }
-        if (actors.gorilla) actors.gorilla.rotation.z = Math.sin(elapsed * (1.4 + power)) * (0.02 + power * 0.025);
-        if (actors.trex) actors.trex.position.x = 1.75 + Math.sin(elapsed * 1.2) * 0.06 - power * 0.08;
-        rim.intensity = 14 + power * 14 + impact * 22;
-      }
-
-      if (variant === "brain") {
-        const dose = Math.min(live.motion, 5);
-        if (actors.brain) {
-          actors.brain.rotation.y = elapsed * 0.55;
-          actors.brain.scale.setScalar(0.68 + dose * 0.045 + impact * 0.18);
-        }
-        if (actors.boy) {
-          const pupils = actors.boy.userData.pupils as THREE.Object3D[];
-          pupils.forEach((pupil, index) => {
-            const restingX = index === 0 ? -0.22 : 0.22;
-            pupil.position.x = THREE.MathUtils.lerp(pupil.position.x, restingX + pointerX * 0.045, 0.08);
-            pupil.position.y = THREE.MathUtils.lerp(pupil.position.y, 1.95 + pointerY * 0.035, 0.08);
-          });
-        }
-        if (actors.boyArm) actors.boyArm.rotation.z = 1.13 + Math.sin(elapsed * 1.4) * 0.05 + impact * 0.32;
-        actors.pills.forEach((pill, index) => {
-          const fall = pillDrop > 0.05 && index === live.motion % actors.pills.length;
-          pill.position.y = fall ? 2.8 - (1 - pillDrop) * 5.2 : pill.userData.originY + Math.sin(elapsed * 1.5 + pill.userData.offset) * 0.16;
-          pill.rotation.x += delta * (0.7 + index * 0.04);
-          pill.rotation.z += delta * 0.6;
-        });
-      }
-
-      if (variant === "demo") {
-        const panic = Math.min(live.motion, 4);
-        if (actors.plane) {
-          actors.plane.rotation.z = -0.12 + Math.sin(elapsed * (1.6 + panic * 0.55)) * (0.035 + panic * 0.05) + impact * 0.14;
-          actors.plane.position.y = 0.18 + Math.sin(elapsed * 2.1) * (0.045 + panic * 0.03);
-          actors.plane.position.x = 1.55 + Math.sin(elapsed * 1.25) * panic * 0.05;
-        }
-        if (actors.excavatorArm) actors.excavatorArm.rotation.z = 0.58 + Math.sin(elapsed * 1.18) * 0.04 + panic * 0.045 + impact * 0.13;
-        actors.clouds.forEach((cloud, index) => { cloud.position.x = -5 + ((elapsed * (0.14 + index * 0.014) + index * 1.7) % 11); });
-      }
-
+      currentX = THREE.MathUtils.lerp(currentX, targetX, dragging ? 0.16 : 0.06);
+      currentY = THREE.MathUtils.lerp(currentY, targetY, dragging ? 0.16 : 0.06);
+      impact *= 0.9;
+      scratchVelocity *= 0.93;
+      orbitRoot.rotation.set(
+        currentX + (reducedMotion ? 0 : Math.sin(elapsed * 0.62) * 0.01),
+        currentY,
+        reducedMotion ? 0 : Math.sin(elapsed * 0.48) * 0.006 + impact * 0.018,
+      );
+      orbitRoot.position.y = reducedMotion ? 0 : Math.sin(elapsed * 0.78) * 0.018;
+      animateActors(elapsed, delta);
       renderer.render(scene, camera);
     }
 
@@ -814,14 +458,7 @@ export function MemeDiorama({
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("pointercancel", onPointerCancel);
       renderer.domElement.removeEventListener("keydown", onKeyDown);
-      scene.traverse((object) => {
-        if (object instanceof THREE.Mesh) {
-          object.geometry.dispose();
-          const surfaces = Array.isArray(object.material) ? object.material : [object.material];
-          surfaces.forEach((surface) => surface.dispose());
-        }
-      });
-      generatedTextures.forEach((texture) => texture.dispose());
+      if (asset) disposeObject(asset);
       timer.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
@@ -829,9 +466,32 @@ export function MemeDiorama({
     };
   }, [accent, hero, variant]);
 
+  const statusText = loadState.status === "ready"
+    ? "BLENDER SCENE LIVE"
+    : loadState.status === "error"
+      ? "RENDERED POSTER · LIVE 3D UNAVAILABLE"
+      : `LOADING 3D CHARACTERS… ${loadState.progress}%`;
+
   return (
-    <div className={`diorama-stage${hero ? " diorama-stage-hero" : ""}`} data-variant={variant} ref={mountRef}>
-      <div className="webgl-fallback" aria-hidden="true">LOADING 3D CHARACTERS…</div>
+    <div
+      className={`diorama-stage${hero ? " diorama-stage-hero" : ""} is-${loadState.status}`}
+      data-variant={variant}
+      data-renderer="blender-glb"
+      ref={mountRef}
+    >
+      <Image
+        className="diorama-poster"
+        src={POSTER_URLS[variant]}
+        alt=""
+        fill
+        sizes="(max-width: 1000px) 100vw, 58vw"
+        aria-hidden="true"
+      />
+      <div className="webgl-fallback" aria-hidden="true">
+        <span>{statusText}</span>
+        {loadState.status === "loading" ? <i style={{ "--load-progress": `${loadState.progress}%` } as React.CSSProperties} /> : null}
+      </div>
+      <span className="diorama-engine" aria-hidden="true">BLENDER → GLB → LIVE</span>
       <span className="diorama-hint" aria-hidden="true">DRAG TO ORBIT · TAP TO ACTIVATE</span>
     </div>
   );
