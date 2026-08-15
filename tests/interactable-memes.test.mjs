@@ -34,7 +34,7 @@ test("server-renders the interactable memes experience", async () => {
   assert.match(html, /THEN THE WORLD\./);
   assert.match(html, /RESET THE LAB/);
   assert.match(html, /The original joke, now with polygons/);
-  assert.match(html, /OFFICE CROSSFIRE/);
+  assert.match(html, /UNIVERSAL NOD PROTOCOL/);
   assert.match(html, /VINYL PURR-SUASION/);
   assert.match(html, /AWKWARD STAREDOWN/);
   assert.match(html, /PLACEBO PROTOCOL/);
@@ -43,8 +43,14 @@ test("server-renders the interactable memes experience", async () => {
   assert.match(html, /LOADING 3D CHARACTERS/);
   assert.match(html, /ORIGINAL MEME/);
   assert.match(html, /INTERACTIVE 3D REMAKE/);
-  assert.match(html, /CLICK TO FIRE · CAMERA LOCKED · RESET TO STAND HIM UP/);
-  assert.match(html, /finger-guns\.png/);
+  assert.match(html, /MOVE AROUND HIS FACE/);
+  assert.match(html, /ZERO CLICKING REQUIRED/);
+  assert.match(html, /nod-map\.png/);
+  assert.match(html, /Hey, man, what(?:&#x27;|')s up\?/);
+  assert.match(html, /Hey, I need to/);
+  assert.match(html, /Yo, man, check this/);
+  assert.match(html, /Greetings sir\. You have my respect\./);
+  assert.doesNotMatch(html, /TRY THE SPOON|hardest-thing\.png/);
   assert.match(html, /dj-cat\.png/);
   assert.match(html, /radioactive-dinosaur\.png/);
   assert.match(html, /brain-pill\.png/);
@@ -61,7 +67,7 @@ test("server-renders the interactable memes experience", async () => {
 
 test("ships the licensed 3D character models used by the meme scenes", () => {
   const modelDirectory = new URL("../public/interactable-memes/models/", import.meta.url);
-  for (const filename of ["business-man.glb", "cat.glb", "gorilla.glb", "trex.glb", "small-airplane.glb"]) {
+  for (const filename of ["cat.glb", "gorilla.glb", "trex.glb", "small-airplane.glb"]) {
     const model = new URL(filename, modelDirectory);
     assert.equal(existsSync(model), true, `${filename} is missing`);
     assert.ok(statSync(model).size > 10_000, `${filename} is unexpectedly small`);
@@ -72,7 +78,7 @@ test("ships the five Blender-authored dioramas and their rendered loading poster
   const modelDirectory = new URL("../public/interactable-memes/studio-models/", import.meta.url);
   const previewDirectory = new URL("../public/interactable-memes/studio-previews/", import.meta.url);
 
-  for (const scene of ["crossfire", "scratch", "reactor", "brain", "demo"]) {
+  for (const scene of ["nod", "scratch", "reactor", "brain", "demo"]) {
     const model = new URL(`${scene}.glb`, modelDirectory);
     const preview = new URL(`${scene}.png`, previewDirectory);
     assert.equal(existsSync(model), true, `${scene}.glb is missing`);
@@ -82,14 +88,18 @@ test("ships the five Blender-authored dioramas and their rendered loading poster
   }
 });
 
-test("uses the production meshes and keeps the gorilla scene core-free", () => {
+test("ships the named interactive props and keeps the gorilla scene core-free", () => {
   const directory = new URL("../public/interactable-memes/studio-models/", import.meta.url);
-  const crossfire = readFileSync(new URL("crossfire.glb", directory)).toString("latin1");
+  const nod = readFileSync(new URL("nod.glb", directory)).toString("latin1");
   const reactor = readFileSync(new URL("reactor.glb", directory)).toString("latin1");
   const demo = readFileSync(new URL("demo.glb", directory)).toString("latin1");
 
-  assert.match(crossfire, /Suit_Body/);
-  assert.match(crossfire, /handMeshNode/);
+  assert.match(nod, /NodHead/);
+  assert.match(nod, /NodBeard/);
+  assert.match(nod, /NodArrow_up/);
+  assert.match(nod, /NodArrow_right/);
+  assert.match(nod, /NodArrow_left/);
+  assert.match(nod, /NodArrow_down/);
   assert.match(reactor, /Geo_Gorilla/);
   assert.match(reactor, /TrexStareEye/);
   assert.doesNotMatch(reactor, /ReactorCore|CoreCrystal|CoreRing/);
@@ -103,6 +113,6 @@ test("ships absolute social preview metadata", async () => {
   const response = await render();
   const html = await response.text();
 
-  assert.match(html, /property="og:image" content="http:\/\/localhost:3000\/interactable-memes\/og-v5\.png"/i);
+  assert.match(html, /property="og:image" content="http:\/\/localhost:3000\/interactable-memes\/og-v7\.png"/i);
   assert.match(html, /name="twitter:card" content="summary_large_image"/i);
 });

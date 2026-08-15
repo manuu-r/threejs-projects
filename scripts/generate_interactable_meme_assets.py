@@ -23,7 +23,6 @@ MODEL_DIR = REPO / "public" / "interactable-memes" / "studio-models"
 PREVIEW_DIR = REPO / "public" / "interactable-memes" / "studio-previews"
 SOURCE_DIR = REPO / "art" / "interactable-memes"
 LICENSED_MODEL_DIR = REPO / "public" / "interactable-memes" / "models"
-HAND_MODEL_DIR = REPO / "public" / "assets" / "hands"
 
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
@@ -451,105 +450,262 @@ def baked_static_meshes(
     return baked
 
 
-def pose_webxr_finger_gun(objects: list[bpy.types.Object]) -> None:
-    rig = imported_armature(objects)
-    if not rig:
-        return
-    for finger in ("middle", "ring", "pinky"):
-        for joint, curl in (
-            ("metacarpal", 0.22),
-            ("phalanx-proximal", 1.62),
-            ("phalanx-intermediate", 1.88),
-            ("phalanx-distal", 1.46),
-        ):
-            bone = rig.pose.bones.get(f"{finger}-finger-{joint}")
-            if not bone:
-                continue
-            bone.rotation_mode = "XYZ"
-            bone.rotation_euler.x = curl
-    bpy.context.view_layer.update()
+def build_hardest() -> bpy.types.Object:
+    """A needlessly serious lab for the world's least cooperative dessert."""
+    root = empty("HardestScene")
+    base_platform(root, "#11151b", PALETTE["cyan"])
 
+    steel = material("Lab steel", "#52616c", roughness=0.28, metallic=0.72)
+    dark = material("Lab black", "#090d12", roughness=0.48, metallic=0.35)
+    cyan = material("Vibranium glow", "#00d9ff", roughness=0.24, metallic=0.58, emission=0.85)
+    blue = material("Ice cream tub blue", "#45aee8", roughness=0.48)
+    white = material("Tub white", "#f5f1e7", roughness=0.58)
+    chocolate = material("Refrozen chocolate", "#4c261b", roughness=0.9)
+    chocolate_light = material("Chocolate frost", "#80513b", roughness=0.94)
+    diamond = material("Diamond crystal", "#bdeeff", roughness=0.16, metallic=0.24)
+    diamond_core = material("Diamond core", "#8deaff", roughness=0.14, emission=0.22)
+    obsidian = material("Obsidian", "#08080c", roughness=0.15, metallic=0.34)
+    obsidian_edge = material("Obsidian edges", "#342044", roughness=0.28, metallic=0.26)
+    red = material("Warning red", "#ff2f3e", roughness=0.34, emission=0.75)
+    amber = material("Warning amber", "#ffb400", roughness=0.35, emission=0.65)
+    silver = material("Spoon metal", "#d9e2e6", roughness=0.18, metallic=0.92)
+    paper = material("Lab labels", "#eae4d8", roughness=0.76)
 
-def make_business_man(root: bpy.types.Object) -> bpy.types.Object:
-    man, imported = import_glb_group(
-        LICENSED_MODEL_DIR / "business-man.glb",
-        "OfficeHero",
-        root,
-        target_size=3.65,
-        location=(0, -0.05, 0.2),
-        fit="height",
-    )
-    set_action_pose(imported, "Idle_Neutral", 18)
-    baked_static_meshes(
-        imported,
-        man,
-        target_size=3.65,
-        location=(0, -0.05, 0.2),
-        fit="height",
-    )
-    return man
+    # Four deliberately overbuilt display bays make the hierarchy immediately read.
+    stations = [(-2.15, 1.15), (2.15, 1.15), (-2.15, -1.35), (2.15, -1.35)]
+    station_names = ("Diamond", "Obsidian", "Vibranium", "RefrozenDessert")
+    for index, ((x, y), station_name) in enumerate(zip(stations, station_names)):
+        box(f"{station_name}Bay", (x, y, 0.34), (1.65, 1.02, 0.16), dark, bevel=0.13, parent=root)
+        box(f"{station_name}BayTrim", (x, y - 1.0, 0.38), (1.52, 0.055, 0.12), cyan if index == 2 else red if index == 3 else steel, bevel=0.025, parent=root)
+        cylinder(f"{station_name}Pedestal", (x, y, 0.72), 0.78, 0.58, steel, vertices=12, parent=root)
+        cylinder(f"{station_name}PedestalTop", (x, y, 1.03), 0.7, 0.08, paper, vertices=12, parent=root)
 
+    # Diamond: a custom-cut gem instead of an off-the-shelf primitive.
+    diamond_rig = empty("DiamondRig", root)
+    vertices = []
+    faces = []
+    rings = [(0.0, 1.64, 0.28), (0.0, 1.38, 0.72), (0.0, 1.08, 0.88), (0.0, 0.54, 0.0)]
+    for _, z, radius in rings[:3]:
+        for index in range(10):
+            angle = math.tau * index / 10 + (math.pi / 10 if z > 1.5 else 0)
+            vertices.append((math.cos(angle) * radius, math.sin(angle) * radius, z))
+    vertices.append((0, 0, rings[3][1]))
+    tip_index = len(vertices) - 1
+    for ring in range(2):
+        for index in range(10):
+            nxt = (index + 1) % 10
+            faces.append((ring * 10 + index, ring * 10 + nxt, (ring + 1) * 10 + nxt, (ring + 1) * 10 + index))
+    for index in range(10):
+        faces.append((20 + index, 20 + (index + 1) % 10, tip_index))
+    faces.append(tuple(reversed(range(10))))
+    mesh = bpy.data.meshes.new("DiamondCutMesh")
+    mesh.from_pydata(vertices, [], faces)
+    mesh.update()
+    gem = bpy.data.objects.new("DiamondCut", mesh)
+    bpy.context.collection.objects.link(gem)
+    # Lift the pavilion clear of the pedestal so it reads as a full diamond,
+    # not a suspiciously expensive serving cloche.
+    gem.location = (-2.15, 1.15, 0.62)
+    gem.data.materials.append(diamond)
+    gem.parent = diamond_rig
+    cone("DiamondPavilion", (-2.15, 1.15, 1.41), 0.0, 0.88, 0.58, diamond, vertices=10, parent=diamond_rig)
+    ico("DiamondInnerGlow", (-2.15, 1.15, 1.86), (0.42, 0.42, 0.5), diamond_core, subdivisions=2, parent=diamond_rig)
 
-def make_finger_gun(name: str, loc: tuple[float, float, float], side: int, parent: bpy.types.Object) -> bpy.types.Object:
-    skin = material("Foreground skin", PALETTE["skin_light"], roughness=0.54)
-    sleeve_colors = ("#334133", "#9c2d32", "#e6e3da", "#2d405c")
-    sleeve = material(f"{name}_Sleeve", sleeve_colors[int(name.split("_")[-1]) % len(sleeve_colors)], roughness=0.64)
-    hand_file = "left.glb" if side == 1 else "right.glb"
-    gun, imported = import_glb_group(
-        HAND_MODEL_DIR / hand_file,
-        name,
-        parent,
-        target_size=1.82,
-        location=loc,
-        fit="span",
-        rotation=(side * 0.28, -side * 1.24, side * 0.1),
-        center_location=True,
-    )
-    pose_webxr_finger_gun(imported)
-    recolor_imported_meshes(imported, skin)
-    baked_static_meshes(
-        imported,
-        gun,
-        target_size=1.82,
-        location=loc,
-        fit="span",
-        center_location=True,
-    )
-    sleeve_start = (loc[0] - side * 1.38, loc[1] + 0.12, loc[2] - 0.02)
-    sleeve_end = (loc[0] - side * 0.58, loc[1] + 0.03, loc[2])
-    segment(name + "_Sleeve", sleeve_start, sleeve_end, 0.3, sleeve, end_radius=0.22, parent=parent)
-    box(name + "_Cuff", sleeve_end, (0.12, 0.19, 0.22), material("Shirt cuffs", "#f1efe8", roughness=0.6), bevel=0.04, parent=parent)
-    return gun
+    # Obsidian: asymmetric fractured rock with a violet glassy edge.
+    obsidian_rig = empty("ObsidianRig", root)
+    rock = ico("ObsidianRock", (2.15, 1.15, 1.5), (0.88, 0.7, 0.72), obsidian, subdivisions=2, rot=(0.2, -0.38, 0.18), parent=obsidian_rig)
+    for vertex in rock.data.vertices:
+        factor = 0.72 + ((vertex.index * 37) % 29) / 70
+        vertex.co.x *= factor
+        vertex.co.y *= 0.82 + ((vertex.index * 19) % 17) / 80
+    for index, offset in enumerate(((-0.66, -0.05), (0.62, 0.2), (0.34, -0.52))):
+        ico(f"ObsidianShard_{index}", (2.15 + offset[0], 1.15 + offset[1], 1.1), (0.22, 0.16, 0.28), obsidian_edge, subdivisions=1, rot=(index * 0.4, index * 0.2, index), parent=obsidian_rig)
 
+    # Vibranium: recognizable glowing ingot/canister with containment rings.
+    vibranium_rig = empty("VibraniumRig", root)
+    box("VibraniumIngot", (-2.15, -1.35, 1.46), (0.34, 0.58, 0.84), steel, rot=(0.05, -0.18, 0.12), bevel=0.11, parent=vibranium_rig)
+    for index in range(4):
+        box(f"VibraniumCore_{index}", (-2.15, -1.95, 1.15 + index * 0.23), (0.23, 0.035, 0.065), cyan, rot=(0.05, -0.18, 0.12), bevel=0.025, parent=vibranium_rig)
+    for index, z in enumerate((1.05, 1.48, 1.9)):
+        torus(f"VibraniumRing_{index}", (-2.15, -1.35, z), 0.67 + index * 0.04, 0.035, cyan, rot=(math.pi / 2, 0, 0), parent=vibranium_rig)
 
-def build_crossfire() -> bpy.types.Object:
-    root = empty("CrossfireScene")
-    base_platform(root, "#2a292c", PALETTE["acid"])
-    wall = material("Office wall", "#8f7f6e", roughness=0.82)
-    window = material("Office windows", "#242b33", roughness=0.32, metallic=0.1)
-    blind = material("Office blinds", "#c6bda8", roughness=0.65)
-    chair = material("Office chairs", "#282629", roughness=0.66)
-    box("BackWall", (0, 2.5, 2.1), (4.25, 0.12, 2.1), wall, bevel=0.04, parent=root)
+    # The real final boss: a frozen-solid tub surrounded by increasingly bad ideas.
+    ice_rig = empty("IceCreamRig", root)
+    cone("IceCreamTub", (2.15, -1.35, 1.55), 0.72, 0.88, 1.08, blue, vertices=24, parent=ice_rig)
+    torus("IceCreamTubRim", (2.15, -1.35, 2.1), 0.83, 0.075, white, parent=ice_rig)
+    torus("IceCreamTubFoot", (2.15, -1.35, 1.01), 0.7, 0.055, white, parent=ice_rig)
+    box("IceCreamLabel", (2.15, -2.075, 1.58), (0.55, 0.025, 0.26), white, bevel=0.04, parent=ice_rig)
+    box("IceCreamLabelBand", (2.15, -2.11, 1.58), (0.41, 0.018, 0.11), chocolate, bevel=0.025, parent=ice_rig)
+    bpy.ops.object.text_add(location=(2.15, -2.145, 1.55), rotation=(math.pi / 2, 0, 0))
+    tub_text = bpy.context.object
+    tub_text.name = "IceCreamBrand_BandJ"
+    tub_text.data.body = "B&J"
+    tub_text.data.align_x = "CENTER"
+    tub_text.data.align_y = "CENTER"
+    tub_text.data.size = 0.23
+    tub_text.data.extrude = 0.012
+    tub_text.data.bevel_depth = 0.006
+    tub_text.data.materials.append(white)
+    bpy.ops.object.convert(target="MESH")
+    tub_text.parent = ice_rig
+    for index, loc in enumerate(((1.72, -1.34, 2.1), (2.18, -1.3, 2.22), (2.59, -1.37, 2.08), (2.08, -1.65, 2.16))):
+        ico(f"IceCreamScoop_{index}", loc, (0.52, 0.46, 0.38), chocolate if index % 2 else chocolate_light, subdivisions=2, parent=ice_rig)
+    for index in range(7):
+        shard_angle = math.tau * index / 7
+        cone(f"FrostSpike_{index}", (2.15 + math.cos(shard_angle) * 0.72, -1.35 + math.sin(shard_angle) * 0.55, 2.32), 0.08, 0, 0.35 + (index % 3) * 0.08, diamond_core, vertices=5, rot=(0.25 * math.sin(shard_angle), 0.25 * math.cos(shard_angle), shard_angle), parent=ice_rig)
+
+    spoon = empty("AttemptSpoon", root)
+    spoon.parent = root
+    spoon_points = [(1.22, -2.24, 2.74), (1.55, -2.04, 2.48), (1.88, -1.86, 2.28), (2.12, -1.69, 2.17)]
+    for index in range(3):
+        segment(f"SpoonHandle_{index}", spoon_points[index], spoon_points[index + 1], 0.055, silver, end_radius=0.047, vertices=10, parent=spoon)
+    ico("SpoonBowl", spoon_points[-1], (0.18, 0.08, 0.27), silver, subdivisions=2, rot=(0.35, 0.1, -0.75), parent=spoon)
+
+    # A tiny jackhammer is objectively the correct utensil.
+    hammer = empty("JackhammerRig", root)
+    box("JackhammerBody", (3.08, -1.62, 2.5), (0.29, 0.22, 0.52), amber, rot=(0.03, -0.38, 0.0), bevel=0.08, parent=hammer)
+    box("JackhammerStripe", (3.0, -1.845, 2.52), (0.18, 0.025, 0.1), dark, rot=(0.03, 0, -0.36), bevel=0.02, parent=hammer)
+    segment("JackhammerBit", (2.92, -1.55, 2.14), (2.48, -1.43, 1.98), 0.055, silver, end_radius=0.018, parent=hammer)
     for side in (-1, 1):
-        box(f"Window_{side}", (2.55 * side, 2.32, 2.18), (1.12, 0.08, 1.22), window, bevel=0.04, parent=root)
-        for row in range(12):
-            box(f"Blind_{side}_{row}", (2.55 * side, 2.2, 1.15 + row * 0.18), (1.05, 0.025, 0.025), blind, bevel=0.01, parent=root)
-    for index in range(5):
-        x = -3.15 + index * 1.55
-        box(f"ChairSeat_{index}", (x, 1.38, 0.58), (0.5, 0.48, 0.12), chair, bevel=0.08, parent=root)
-        box(f"ChairBack_{index}", (x, 1.78, 1.08), (0.5, 0.12, 0.55), chair, rot=(0.08, 0, 0), bevel=0.08, parent=root)
-        for dx in (-0.36, 0.36):
-            segment(f"ChairLeg_{index}_{dx}", (x + dx, 1.18, 0.13), (x + dx, 1.32, 0.55), 0.04, chair, parent=root)
-    make_business_man(root)
-    placements = [
-        ((-3.2, -1.22, 2.3), 1),
-        ((3.2, -1.12, 2.2), -1),
-        ((-3.0, -0.75, 1.18), 1),
-        ((3.05, -0.65, 1.1), -1),
-    ]
-    for index, (loc, side) in enumerate(placements):
-        gun = make_finger_gun(f"FingerGun_{index}", loc, side, root)
-        gun.rotation_euler[2] = (0.08 if index % 2 else -0.06) * side
+        segment(f"JackhammerHandle_{side}", (3.08, -1.62, 2.72), (3.34, -1.62 + side * 0.26, 2.88), 0.055, dark, parent=hammer)
+
+    for index, x in enumerate((1.15, 3.25)):
+        warning = empty(f"WarningLight_{index}", root)
+        cylinder(f"WarningBase_{index}", (x, -2.18, 0.86), 0.22, 0.1, dark, vertices=12, parent=warning)
+        cone(f"WarningBeacon_{index}", (x, -2.18, 1.05), 0.17, 0.11, 0.32, amber if index == 0 else red, vertices=12, parent=warning)
+    for index in range(3):
+        # Casualties from previous attempts.
+        bend = -0.32 + index * 0.22
+        segment(f"FallenSpoon_{index}_A", (0.85 + index * 0.22, -1.0, 0.45), (1.05 + index * 0.24, -0.82 + bend, 0.52), 0.035, silver, end_radius=0.025, parent=root)
+        segment(f"FallenSpoon_{index}_B", (1.05 + index * 0.24, -0.82 + bend, 0.52), (1.18 + index * 0.27, -0.62 + bend, 0.43), 0.03, silver, end_radius=0.02, parent=root)
+    return root
+
+
+def build_nod() -> bpy.types.Object:
+    """A polished low-poly bust that performs the four universal man nods."""
+    root = empty("NodScene")
+    base_platform(root, "#12151c", PALETTE["cyan"], shape="round")
+
+    skin = material("Nod skin", "#d99567", roughness=0.64)
+    skin_light = material("Nod skin highlight", "#efb083", roughness=0.58)
+    shirt = material("Nod black shirt", "#101318", roughness=0.72)
+    beard = material("Nod beard", "#26110d", roughness=0.84)
+    beard_light = material("Nod beard highlight", "#512a1e", roughness=0.8)
+    hair = material("Nod hair", "#2a1715", roughness=0.76)
+    white = material("Nod eye white", "#f7f1e6", roughness=0.35)
+    iris = material("Nod blue iris", "#5cc8ee", roughness=0.2, emission=0.12)
+    pupil = material("Nod pupil", "#080a0c", roughness=0.25)
+    cyan = material("Nod up cyan", "#28e4f4", roughness=0.3, emission=0.65)
+    orange = material("Nod right orange", "#ff733f", roughness=0.34, emission=0.48)
+    violet = material("Nod left violet", "#9b64ff", roughness=0.32, emission=0.5)
+    acid = material("Nod down acid", "#caff20", roughness=0.32, emission=0.6)
+    halo = material("Nod radar", "#1f7784", roughness=0.42, emission=0.2)
+
+    # Bust and shoulders are intentionally broad so the character reads as a
+    # proper adult man rather than a floating emoji head.
+    cone("NodTorso", (0, 0.26, 1.08), 1.6, 1.03, 1.72, shirt, vertices=14, parent=root)
+    ico("NodShoulders", (0, 0.18, 1.42), (1.7, 0.62, 0.58), shirt, subdivisions=2, parent=root)
+    cylinder("NodNeck", (0, -0.01, 2.03), 0.39, 0.64, skin, vertices=12, parent=root)
+
+    # Everything facial is local to this pivot, which gives the browser a real
+    # head to yaw, pitch, and nod without deforming the torso.
+    head = empty("NodHead", root)
+    head.location = (0, -0.08, 2.77)
+    ico("NodSkull", (0, 0, 0.08), (0.88, 0.68, 1.03), skin, subdivisions=2, parent=head)
+    ico("NodCheek_L", (-0.46, -0.5, -0.05), (0.36, 0.18, 0.43), skin_light, subdivisions=2, parent=head)
+    ico("NodCheek_R", (0.46, -0.5, -0.05), (0.36, 0.18, 0.43), skin_light, subdivisions=2, parent=head)
+    for side in (-1, 1):
+        ico(f"NodEar_{side}", (0.82 * side, -0.01, 0.08), (0.18, 0.12, 0.29), skin, subdivisions=2, parent=head)
+        ico(f"NodEye_{side}", (0.31 * side, -0.65, 0.27), (0.19, 0.1, 0.15), white, subdivisions=2, parent=head)
+        ico(f"NodIris_{side}", (0.31 * side, -0.74, 0.27), (0.087, 0.035, 0.087), iris, subdivisions=2, parent=head)
+        ico(f"NodPupil_{side}", (0.31 * side, -0.776, 0.27), (0.037, 0.02, 0.047), pupil, subdivisions=2, parent=head)
+        segment(
+            f"NodBrow_{side}",
+            (0.12 * side, -0.72, 0.52),
+            (0.51 * side, -0.64, 0.56),
+            0.055,
+            hair,
+            end_radius=0.075,
+            vertices=7,
+            parent=head,
+        )
+    cone("NodNose", (0, -0.78, 0.03), 0.16, 0.055, 0.42, skin_light, vertices=7, rot=(math.pi / 2, 0, 0), parent=head)
+    box("NodMouth", (0, -0.78, -0.31), (0.2, 0.035, 0.035), pupil, bevel=0.025, parent=head)
+
+    beard_rig = empty("NodBeard", head)
+    ico("NodBeardMass", (0, -0.66, -0.4), (0.69, 0.22, 0.74), beard, subdivisions=2, parent=beard_rig)
+    ico("NodBeardChin", (0, -0.64, -0.86), (0.45, 0.2, 0.5), beard_light, subdivisions=2, parent=beard_rig)
+    for side in (-1, 1):
+        segment(f"NodMoustache_{side}", (0.02 * side, -0.81, -0.21), (0.34 * side, -0.68, -0.28), 0.08, beard_light, end_radius=0.045, vertices=8, parent=beard_rig)
+        for index in range(4):
+            cone(
+                f"NodBeardPoint_{side}_{index}",
+                (side * (0.12 + index * 0.11), -0.52, -0.78 + abs(index - 1.5) * 0.05),
+                0.11,
+                0,
+                0.34,
+                beard if index % 2 else beard_light,
+                vertices=6,
+                rot=(0.12 * side, 0.08 * side, math.pi),
+                parent=beard_rig,
+            )
+
+    ico("NodHairCap", (0, 0.02, 0.86), (0.78, 0.62, 0.38), hair, subdivisions=2, parent=head)
+    for index in range(9):
+        x = -0.6 + index * 0.15
+        cone(
+            f"NodHairQuiff_{index}",
+            (x, -0.35 + abs(x) * 0.12, 1.12 - abs(x) * 0.18),
+            0.17,
+            0,
+            0.48 - abs(x) * 0.18,
+            hair if index % 2 else beard_light,
+            vertices=6,
+            rot=(0.08, x * 0.2, -x * 0.3),
+            parent=head,
+        )
+
+    # Radar rings and four physical arrows turn the reference diagram into a
+    # real stage while keeping the character silhouette clean.
+    for index, radius in enumerate((1.35, 1.7, 2.08)):
+        torus(f"NodRadar_{index}", (0, 0.48, 2.77), radius, 0.025, halo, rot=(math.pi / 2, 0, 0), parent=root)
+
+    def make_arrow(direction: str, location: tuple[float, float, float], arrow_mat: bpy.types.Material) -> None:
+        arrow = empty(f"NodArrow_{direction}", root)
+        arrow.location = location
+        if direction in ("up", "down"):
+            box(f"NodArrow_{direction}_Shaft", (0, 0, 0), (0.16, 0.11, 0.38), arrow_mat, bevel=0.05, parent=arrow)
+            z_sign = 1 if direction == "up" else -1
+            cone(
+                f"NodArrow_{direction}_Head",
+                (0, 0, 0.55 * z_sign),
+                0.38,
+                0,
+                0.48,
+                arrow_mat,
+                vertices=6,
+                rot=(0, 0, 0 if direction == "up" else math.pi),
+                parent=arrow,
+            )
+        else:
+            x_sign = -1 if direction == "right" else 1
+            box(f"NodArrow_{direction}_Shaft", (0, 0, 0), (0.38, 0.11, 0.16), arrow_mat, bevel=0.05, parent=arrow)
+            cone(
+                f"NodArrow_{direction}_Head",
+                (0.55 * x_sign, 0, 0),
+                0.38,
+                0,
+                0.48,
+                arrow_mat,
+                vertices=6,
+                rot=(0, -math.pi / 2 if direction == "right" else math.pi / 2, 0),
+                parent=arrow,
+            )
+
+    make_arrow("up", (0, -0.24, 4.52), cyan)
+    make_arrow("right", (-2.38, -0.2, 2.78), orange)
+    make_arrow("left", (2.38, -0.2, 2.78), violet)
+    make_arrow("down", (0, -1.38, 0.94), acid)
     return root
 
 
@@ -1026,7 +1182,7 @@ def export_scene(scene_name: str, root: bpy.types.Object) -> None:
 
 
 SCENES = [
-    ("crossfire", build_crossfire, (7.6, -12.5, 6.3), (0, 0.25, 1.7), PALETTE["acid"]),
+    ("nod", build_nod, (7.2, -12.8, 5.7), (0, 0.0, 2.35), PALETTE["cyan"]),
     ("scratch", build_scratch, (7.8, -12.2, 6.0), (0, 0.2, 1.7), PALETTE["violet"]),
     ("reactor", build_reactor, (8.5, -13.2, 6.8), (0.1, 0.1, 1.65), PALETTE["acid"]),
     ("brain", build_brain, (8.2, -13.0, 6.4), (0.2, 0.2, 1.8), PALETTE["cyan"]),

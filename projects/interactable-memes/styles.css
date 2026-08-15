@@ -88,6 +88,7 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
 .diorama-stage.is-ready .diorama-canvas { opacity: 1; }
 .diorama-canvas:active { cursor: grabbing; }
 .diorama-canvas.is-click-only, .diorama-canvas.is-click-only:active { cursor: crosshair; touch-action: manipulation; }
+.diorama-canvas.is-directional, .diorama-canvas.is-directional:active { cursor: crosshair; touch-action: none; }
 .diorama-canvas:focus-visible { box-shadow: inset 0 0 0 4px var(--acid); }
 .diorama-hint { position: absolute; z-index: 5; left: 12px; bottom: 12px; padding: 8px 10px; border: 1px solid rgba(240,237,228,.4); border-radius: 999px; background: rgba(12,12,12,.7); color: var(--paper); backdrop-filter: blur(8px); font: 900 8px/1 "Courier New", monospace; letter-spacing: .07em; pointer-events: none; }
 .diorama-engine { position: absolute; z-index: 5; top: 12px; right: 12px; padding: 8px 10px; border: 1px solid rgba(240,237,228,.28); background: rgba(7,7,9,.68); color: var(--acid); font: 900 8px/1 "Courier New", monospace; letter-spacing: .08em; pointer-events: none; }
@@ -117,10 +118,27 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
 .scene-meme-copy-brain strong { display: block; font-size: clamp(13px, 1.45vw, 24px); line-height: 1.08; }
 .scene-meme-copy-brain b { position: absolute; right: 10px; bottom: 16px; left: 10px; color: white; font: 900 clamp(14px, 1.75vw, 28px)/1 Arial, sans-serif; text-align: center; -webkit-text-stroke: 1px #111; text-shadow: 2px 2px 0 #111; }
 
-.room-standoff { --room-accent: #d8ff38; }
-.room-standoff .room-copy h2 em { color: var(--room-accent); }
-.scoreboard { display: flex; align-items: center; justify-content: space-between; padding: 15px 16px; border: 1px solid var(--ink); background: var(--paper); font: 900 10px/1 "Courier New", monospace; letter-spacing: .08em; box-shadow: 7px 7px 0 var(--ink); }
-.scoreboard strong { font-size: 34px; }
+.scene-meme-copy-nod p { position: absolute; z-index: 1; margin: 0; color: white; font-family: Arial, sans-serif; text-shadow: 0 2px 5px #000, 1px 1px 0 #000; }
+.scene-meme-copy-nod b { display: block; font-size: clamp(9px, 1vw, 16px); line-height: 1.15; }
+.scene-meme-copy-nod span { display: block; margin-top: 5px; color: #31e6f4; font: 900 clamp(8px, .85vw, 13px)/1.1 "Courier New", monospace; letter-spacing: .04em; }
+.nod-copy-up { top: 8px; left: 32%; right: 32%; text-align: center; }
+.nod-copy-right { top: 42%; left: 10px; width: 27%; }
+.nod-copy-left { top: 42%; right: 10px; width: 27%; text-align: right; }
+.nod-copy-down { right: 25%; bottom: 8px; left: 25%; text-align: center; }
+.nod-copy-down span { margin: 0 0 5px; color: #caff20; }
+
+.room-nod { --room-accent: #28e4f4; }
+.room-nod .room-copy h2 em { color: var(--room-accent); }
+.nod-readout { min-height: 102px; display: grid; align-content: center; gap: 10px; padding: 18px 20px; border: 1px solid #28e4f4; background: #080c11; color: white; box-shadow: 7px 7px 0 var(--ink); }
+.nod-readout span { color: #28e4f4; font: 900 9px/1 "Courier New", monospace; letter-spacing: .1em; }
+.nod-readout strong { font-size: 14px; line-height: 1.3; }
+.nod-readout-down { border-color: #caff20; }
+.nod-readout-down span { color: #caff20; }
+.nod-readout-right { border-color: #ff733f; }
+.nod-readout-right span { color: #ff733f; }
+.nod-readout-left { border-color: #9b64ff; }
+.nod-readout-left span { color: #b890ff; }
+.machine-nod .compare-label span:last-child { color: #008e9e; }
 
 .room-scratch { --room-accent: #b967ff; }
 .room-scratch .room-copy h2 em { color: var(--room-accent); }
@@ -166,7 +184,7 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
 @media (max-width: 1000px) {
   .hero-copy { width: auto; }
   .room-heading { grid-template-columns: 1fr; gap: 32px; }
-  .scoreboard, .dj-controls, .reactor-trigger, .brain-controls, .demo-controls { width: min(100%, 440px); }
+  .nod-readout, .dj-controls, .reactor-trigger, .brain-controls, .demo-controls { width: min(100%, 440px); }
   .meme-comparison { grid-template-columns: 1fr; gap: 32px; }
   .reference-media, .diorama-stage { height: min(73vw, 650px); min-height: 460px; }
 }

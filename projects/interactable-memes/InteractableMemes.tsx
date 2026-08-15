@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useState } from "react";
-import { MemeDiorama } from "./MemeDiorama";
+import { MemeDiorama, type NodDirection } from "./MemeDiorama";
 
 const levels = ["NOTICED", "EYE CONTACT", "AWKWARD", "VERY AWKWARD"];
 const reactions = [
@@ -18,6 +18,13 @@ const demoStates = [
   "RENAMING ‘BROKEN’ TO ‘BETA’…",
   "DEMO READY-ISH. DO NOT REFRESH.",
 ];
+const nodLines: Record<NodDirection, { label: string; line: string }> = {
+  center: { label: "CENTERED", line: "MOVE AROUND HIS FACE — NO CLICK NEEDED" },
+  up: { label: "UP NOD", line: "Hey, man, what's up?" },
+  right: { label: "MAN'S RIGHT NOD", line: "Hey, I need to talk to you." },
+  left: { label: "MAN'S LEFT NOD", line: "Yo, man, check this girl out!" },
+  down: { label: "DOWN NOD", line: "Greetings sir. You have my respect." },
+};
 
 type MemeReferenceProps = {
   src: string;
@@ -41,7 +48,7 @@ function MemeReference({ src, alt, width, height, index, note }: MemeReferencePr
 }
 
 export default function InteractableMemes() {
-  const [shotCount, setShotCount] = useState(0);
+  const [nodDirection, setNodDirection] = useState<NodDirection>("center");
   const [isPlaying, setIsPlaying] = useState(true);
   const [bpm, setBpm] = useState(118);
   const [reactorLevel, setReactorLevel] = useState(0);
@@ -49,7 +56,7 @@ export default function InteractableMemes() {
   const [demoLevel, setDemoLevel] = useState(0);
 
   function resetAll() {
-    setShotCount(0);
+    setNodDirection("center");
     setIsPlaying(true);
     setBpm(118);
     setReactorLevel(0);
@@ -71,7 +78,7 @@ export default function InteractableMemes() {
       </header>
 
       <section className="hero" id="top">
-        <Image className="hero-art" src="/interactable-memes/og-v5.png" alt="Interactable Memes ensemble in the polished low-poly studio art direction" fill priority sizes="100vw" />
+        <Image className="hero-art" src="/interactable-memes/og-v7.png" alt="Interactable Memes ensemble with a serious bearded man surrounded by four directional arrows in the polished low-poly studio art direction" fill priority sizes="100vw" />
         <div className="hero-shade" aria-hidden="true" />
         <div className="hero-noise" aria-hidden="true" />
         <div className="hero-copy">
@@ -84,21 +91,30 @@ export default function InteractableMemes() {
         <div className="hero-footer" aria-hidden="true"><span>ORIGINAL / 3D / INTERACTIVE</span><span>DRAG · TAP · MAKE THE JOKE WORSE</span></div>
       </section>
 
-      <section className="meme-room room-standoff" id="standoff" data-room="01">
+      <section className="meme-room room-nod" id="standoff" data-room="01">
         <div className="room-heading">
           <div className="room-copy">
-            <p className="room-index">01 / OFFICE CROSSFIRE</p>
-            <h2>Finger guns.<br /><em>Real depth.</em></h2>
-            <p>The flat stand-ins are gone. The remake now uses four skinned anatomical hand meshes and a rigged, properly proportioned businessman in a real suit.</p>
+            <p className="room-index">01 / UNIVERSAL NOD PROTOCOL</p>
+            <h2>Read the room.<br /><em>Move your head.</em></h2>
+            <p>The four-direction nod chart becomes a live social-navigation system. Move around his face and the bearded low-poly gentleman performs the correct nod automatically.</p>
           </div>
-          <div className="scoreboard" aria-live="polite"><span>SHOTS FIRED</span><strong>{String(shotCount).padStart(2, "0")}</strong></div>
+          <div className={`nod-readout nod-readout-${nodDirection}`} aria-live="polite">
+            <span>{nodLines[nodDirection].label}</span>
+            <strong>{nodLines[nodDirection].line}</strong>
+          </div>
         </div>
         <div className="meme-comparison">
-          <MemeReference src="/interactable-memes/source/finger-guns.png" alt="Original office finger-gun standoff meme" width={708} height={534} index="01" note="THE ORIGINAL FRAME / MAXIMUM CORPORATE TENSION" />
-          <div className="machine machine-standoff">
-            <div className="compare-label"><span>INTERACTIVE 3D REMAKE</span><span>01B / ARMED</span></div>
-            <MemeDiorama variant="crossfire" accent="#d8ff38" motion={shotCount} orbitable={false} ariaLabel="Static 3D finger-gun standoff. Click to fire and knock down the suited man." onAction={() => setShotCount((count) => count + 1)} />
-            <p className="machine-tip">CLICK TO FIRE · CAMERA LOCKED · RESET TO STAND HIM UP</p>
+          <MemeReference src="/interactable-memes/source/nod-map.png" alt="Four-direction man nod meme explaining up, down, man's right, and man's left nods" width={993} height={781} index="01" note="UP NOD / MAN'S RIGHT NOD / MAN'S LEFT NOD / DOWN NOD" />
+          <div className="machine machine-nod">
+            <div className="compare-label"><span>INTERACTIVE 3D REMAKE</span><span>{nodLines[nodDirection].label}</span></div>
+            <div className="scene-meme-copy scene-meme-copy-nod" aria-hidden="true">
+              <p className="nod-copy-up"><b>Hey, man, what's up?</b><span>UP NOD</span></p>
+              <p className="nod-copy-right"><b>Hey, I need to<br />talk to you.</b><span>MAN'S<br />RIGHT NOD</span></p>
+              <p className="nod-copy-left"><b>Yo, man, check this<br />girl out!</b><span>MAN'S<br />LEFT NOD</span></p>
+              <p className="nod-copy-down"><span>DOWN NOD</span><b>Greetings sir. You have my respect.</b></p>
+            </div>
+            <MemeDiorama variant="nod" accent="#28e4f4" orbitable={false} ariaLabel="Interactive 3D bearded man. Move the pointer around his face to perform the four directional nods; no click is needed." onNodDirection={setNodDirection} />
+            <p className="machine-tip">MOVE AROUND HIS FACE · HEAD TRACKS DIRECTION · ZERO CLICKING REQUIRED</p>
           </div>
         </div>
       </section>

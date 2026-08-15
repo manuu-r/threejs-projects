@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
-export type DioramaVariant = "crossfire" | "scratch" | "reactor" | "brain" | "demo";
+export type DioramaVariant = "nod" | "scratch" | "reactor" | "brain" | "demo";
+export type NodDirection = "center" | "up" | "right" | "left" | "down";
 
 type MemeDioramaProps = {
   variant: DioramaVariant;
@@ -17,6 +18,7 @@ type MemeDioramaProps = {
   orbitable?: boolean;
   onAction?: () => void;
   onDragStart?: () => void;
+  onNodDirection?: (direction: NodDirection) => void;
 };
 
 type LoadState = {
@@ -25,14 +27,16 @@ type LoadState = {
 };
 
 type SceneActors = {
-  hands: THREE.Object3D[];
+  nodArrows: THREE.Object3D[];
+  nodPupils: THREE.Object3D[];
   platters: THREE.Object3D[];
   bars: THREE.Object3D[];
   pills: THREE.Object3D[];
   portalRings: THREE.Object3D[];
   smoke: THREE.Object3D[];
   starePupils: THREE.Object3D[];
-  officeHero?: THREE.Object3D;
+  nodHead?: THREE.Object3D;
+  nodBeard?: THREE.Object3D;
   cat?: THREE.Object3D;
   gorilla?: THREE.Object3D;
   trex?: THREE.Object3D;
@@ -48,23 +52,23 @@ type SceneActors = {
 };
 
 const SCENE_URLS: Record<DioramaVariant, string> = {
-  crossfire: "/interactable-memes/studio-models/crossfire.glb?v=9",
-  scratch: "/interactable-memes/studio-models/scratch.glb?v=9",
-  reactor: "/interactable-memes/studio-models/reactor.glb?v=9",
-  brain: "/interactable-memes/studio-models/brain.glb?v=9",
-  demo: "/interactable-memes/studio-models/demo.glb?v=9",
+  nod: "/interactable-memes/studio-models/nod.glb?v=11",
+  scratch: "/interactable-memes/studio-models/scratch.glb?v=11",
+  reactor: "/interactable-memes/studio-models/reactor.glb?v=11",
+  brain: "/interactable-memes/studio-models/brain.glb?v=11",
+  demo: "/interactable-memes/studio-models/demo.glb?v=11",
 };
 
 const POSTER_URLS: Record<DioramaVariant, string> = {
-  crossfire: "/interactable-memes/studio-previews/crossfire.png?v=9",
-  scratch: "/interactable-memes/studio-previews/scratch.png?v=9",
-  reactor: "/interactable-memes/studio-previews/reactor.png?v=9",
-  brain: "/interactable-memes/studio-previews/brain.png?v=9",
-  demo: "/interactable-memes/studio-previews/demo.png?v=9",
+  nod: "/interactable-memes/studio-previews/nod.png?v=11",
+  scratch: "/interactable-memes/studio-previews/scratch.png?v=11",
+  reactor: "/interactable-memes/studio-previews/reactor.png?v=11",
+  brain: "/interactable-memes/studio-previews/brain.png?v=11",
+  demo: "/interactable-memes/studio-previews/demo.png?v=11",
 };
 
 const BACKGROUNDS: Record<DioramaVariant, number> = {
-  crossfire: 0x080909,
+  nod: 0x030a0f,
   scratch: 0x09050f,
   reactor: 0x070b05,
   brain: 0x031015,
@@ -100,14 +104,16 @@ function baseScale(object: THREE.Object3D) {
 
 function collectActors(asset: THREE.Object3D): SceneActors {
   const actors: SceneActors = {
-    hands: namedChildren(asset, "FingerGun_").filter((object) => /^FingerGun_\d+$/.test(object.name)),
+    nodArrows: namedChildren(asset, "NodArrow_").filter((object) => /^NodArrow_(up|right|left|down)$/.test(object.name)),
+    nodPupils: namedChildren(asset, "NodPupil_"),
     platters: [asset.getObjectByName("Platter_L"), asset.getObjectByName("Platter_R")].filter(Boolean) as THREE.Object3D[],
     bars: namedChildren(asset, "EQ_"),
     pills: namedChildren(asset, "Pill_").filter((object) => /^Pill_\d+$/.test(object.name)),
     portalRings: namedChildren(asset, "PortalRing_"),
     smoke: namedChildren(asset, "Smoke_"),
     starePupils: namedChildren(asset, "TrexStarePupil_"),
-    officeHero: asset.getObjectByName("OfficeHero"),
+    nodHead: asset.getObjectByName("NodHead"),
+    nodBeard: asset.getObjectByName("NodBeard"),
     cat: asset.getObjectByName("DJCat"),
     gorilla: asset.getObjectByName("Gorilla"),
     trex: asset.getObjectByName("Trex"),
@@ -173,16 +179,19 @@ export function MemeDiorama({
   orbitable = true,
   onAction,
   onDragStart,
+  onNodDirection,
 }: MemeDioramaProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const actionRef = useRef(onAction);
   const dragStartRef = useRef(onDragStart);
+  const nodDirectionRef = useRef(onNodDirection);
   const stateRef = useRef({ motion, speed });
   const labelRef = useRef(ariaLabel);
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading", progress: 0 });
 
   useEffect(() => { actionRef.current = onAction; }, [onAction]);
   useEffect(() => { dragStartRef.current = onDragStart; }, [onDragStart]);
+  useEffect(() => { nodDirectionRef.current = onNodDirection; }, [onNodDirection]);
   useEffect(() => { stateRef.current = { motion, speed }; }, [motion, speed]);
   useEffect(() => {
     labelRef.current = ariaLabel;
@@ -208,9 +217,9 @@ export function MemeDiorama({
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.18;
-    renderer.domElement.className = `diorama-canvas${orbitable ? "" : " is-click-only"}`;
+    renderer.domElement.className = `diorama-canvas${variant === "nod" ? " is-directional" : orbitable ? "" : " is-click-only"}`;
     renderer.domElement.tabIndex = 0;
-    renderer.domElement.setAttribute("role", "button");
+    renderer.domElement.setAttribute("role", variant === "nod" ? "application" : "button");
     renderer.domElement.setAttribute("aria-label", labelRef.current);
     mount.appendChild(renderer.domElement);
 
@@ -220,7 +229,8 @@ export function MemeDiorama({
     scene.fog = new THREE.FogExp2(background, 0.026);
     const camera = new THREE.PerspectiveCamera(hero ? 34 : 38, 1, 0.1, 100);
     const cameraDistance = variant === "demo" ? 9.5 : hero ? 9.2 : 8.65;
-    camera.position.set(0, 0.1, cameraDistance);
+    camera.position.set(0, variant === "nod" ? 0.3 : 0.1, cameraDistance);
+    camera.lookAt(0, variant === "nod" ? 0.05 : 0, 0);
 
     scene.add(new THREE.HemisphereLight(0xfff4df, 0x08080d, 0.92));
     const key = new THREE.DirectionalLight(0xfff6e7, 3.6);
@@ -259,8 +269,8 @@ export function MemeDiorama({
     let lastY = 0;
     let impact = 0;
     let scratchVelocity = 0;
+    const nodTarget = { x: 0, y: 0, direction: "center" as NodDirection };
     let previousMotion = stateRef.current.motion;
-    let fallProgress = stateRef.current.motion > 0 ? 1 : 0;
     let demoSpinAngle = 0;
     const timer = new THREE.Timer();
     timer.connect(document);
@@ -282,7 +292,7 @@ export function MemeDiorama({
           const surfaces = Array.isArray(object.material) ? object.material : [object.material];
           surfaces.forEach((surface) => {
             if (surface instanceof THREE.MeshStandardMaterial) {
-              surface.flatShading = variant !== "crossfire";
+              surface.flatShading = true;
               surface.needsUpdate = true;
             }
           });
@@ -309,15 +319,40 @@ export function MemeDiorama({
       camera.position.z = variant === "demo"
         ? width < 560 ? 11.2 : 9.5
         : width < 560 ? (hero ? 10.8 : 10.1) : (hero ? 9.2 : 8.65);
+      camera.position.y = variant === "nod" ? (width < 560 ? 0.45 : 0.3) : 0.1;
+      camera.lookAt(0, variant === "nod" ? 0.05 : 0, 0);
       camera.updateProjectionMatrix();
     }
 
     function activate() {
+      if (variant === "nod") return;
       impact = 1;
       actionRef.current?.();
     }
 
+    function updateNod(clientX: number, clientY: number) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      const x = THREE.MathUtils.clamp(((clientX - rect.left) / Math.max(rect.width, 1)) * 2 - 1, -1, 1);
+      const y = THREE.MathUtils.clamp(((clientY - rect.top) / Math.max(rect.height, 1)) * 2 - 1, -1, 1);
+      nodTarget.x = x;
+      nodTarget.y = y;
+      const direction: NodDirection = Math.hypot(x, y) < 0.22
+        ? "center"
+        : Math.abs(y) >= Math.abs(x)
+          ? y < 0 ? "up" : "down"
+          : x < 0 ? "right" : "left";
+      if (direction !== nodTarget.direction) {
+        nodTarget.direction = direction;
+        nodDirectionRef.current?.(direction);
+      }
+    }
+
     function onPointerDown(event: PointerEvent) {
+      if (variant === "nod") {
+        updateNod(event.clientX, event.clientY);
+        renderer.domElement.setPointerCapture(event.pointerId);
+        return;
+      }
       dragging = true;
       dragged = false;
       lastX = event.clientX;
@@ -327,6 +362,10 @@ export function MemeDiorama({
     }
 
     function onPointerMove(event: PointerEvent) {
+      if (variant === "nod") {
+        updateNod(event.clientX, event.clientY);
+        return;
+      }
       if (!dragging || !orbitable) return;
       const dx = event.clientX - lastX;
       const dy = event.clientY - lastY;
@@ -339,6 +378,10 @@ export function MemeDiorama({
     }
 
     function onPointerUp(event: PointerEvent) {
+      if (variant === "nod") {
+        if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId);
+        return;
+      }
       dragging = false;
       if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId);
       if (!dragged) activate();
@@ -350,6 +393,16 @@ export function MemeDiorama({
     }
 
     function onKeyDown(event: KeyboardEvent) {
+      if (variant === "nod" && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+        event.preventDefault();
+        const point = event.key === "ArrowUp" ? [0, -1]
+          : event.key === "ArrowDown" ? [0, 1]
+            : event.key === "ArrowLeft" ? [-1, 0]
+              : [1, 0];
+        const rect = renderer.domElement.getBoundingClientRect();
+        updateNod(rect.left + ((point[0] + 1) / 2) * rect.width, rect.top + ((point[1] + 1) / 2) * rect.height);
+        return;
+      }
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
         activate();
@@ -378,26 +431,32 @@ export function MemeDiorama({
     function animateActors(elapsed: number, delta: number) {
       if (!actors) return;
       const live = stateRef.current;
-      if (variant === "crossfire") {
-        const fallTarget = live.motion > 0 ? 1 : 0;
-        fallProgress = reducedMotion
-          ? fallTarget
-          : THREE.MathUtils.clamp(fallProgress + delta * (fallTarget ? 1.75 : -3.2), 0, 1);
-        const fall = 1 - (1 - fallProgress) ** 3;
-        actors.hands.forEach((hand, index) => {
-          const base = basePosition(hand);
-          hand.position.z = base.z + (reducedMotion ? 0 : Math.sin(elapsed * 1.7 + index) * 0.025) + impact * 0.32;
-          hand.rotation.y = baseRotation(hand).y + (reducedMotion ? 0 : Math.sin(elapsed * 0.8 + index) * 0.025);
-        });
-        if (actors.officeHero) {
-          const position = basePosition(actors.officeHero);
-          const rotation = baseRotation(actors.officeHero);
-          actors.officeHero.position.x = position.x + fall * 0.16;
-          actors.officeHero.position.y = position.y - fall * 0.62;
-          actors.officeHero.position.z = position.z + fall * 0.16;
-          actors.officeHero.rotation.x = rotation.x + fall * 0.12;
-          actors.officeHero.rotation.z = rotation.z - fall * 1.34 - impact * 0.1 + (reducedMotion ? 0 : Math.sin(elapsed * 1.1) * 0.008);
+      if (variant === "nod") {
+        if (actors.nodHead) {
+          const base = baseRotation(actors.nodHead);
+          const amount = reducedMotion ? 1 : 0.12;
+          actors.nodHead.rotation.x = THREE.MathUtils.lerp(actors.nodHead.rotation.x, base.x + nodTarget.y * 0.34, amount);
+          actors.nodHead.rotation.y = THREE.MathUtils.lerp(actors.nodHead.rotation.y, base.y + nodTarget.x * 0.46, amount);
+          actors.nodHead.rotation.z = THREE.MathUtils.lerp(actors.nodHead.rotation.z, base.z - nodTarget.x * 0.07, amount);
         }
+        actors.nodPupils.forEach((eye) => {
+          const base = basePosition(eye);
+          eye.position.x = base.x + nodTarget.x * 0.04;
+          eye.position.y = base.y - nodTarget.y * 0.035;
+        });
+        if (actors.nodBeard) {
+          const base = baseRotation(actors.nodBeard);
+          actors.nodBeard.rotation.x = base.x + nodTarget.y * 0.045;
+          actors.nodBeard.rotation.z = base.z - nodTarget.x * 0.04;
+        }
+        actors.nodArrows.forEach((arrow, index) => {
+          const direction = arrow.name.replace("NodArrow_", "") as NodDirection;
+          const selected = direction === nodTarget.direction;
+          const pulse = selected && !reducedMotion ? 1.08 + Math.sin(elapsed * 6 + index) * 0.07 : selected ? 1.1 : 0.86;
+          const base = baseScale(arrow);
+          arrow.scale.set(base.x * pulse, base.y * pulse, base.z * pulse);
+        });
+        rim.intensity = 34 + (nodTarget.direction === "center" ? 0 : 10);
       }
       if (reducedMotion) return;
       if (variant === "scratch") animateScratch(elapsed, delta, live);
@@ -535,7 +594,7 @@ export function MemeDiorama({
         {loadState.status === "loading" ? <i style={{ "--load-progress": `${loadState.progress}%` } as React.CSSProperties} /> : null}
       </div>
       <span className="diorama-engine" aria-hidden="true">BLENDER → GLB → LIVE</span>
-      <span className="diorama-hint" aria-hidden="true">{orbitable ? "DRAG TO ORBIT · TAP TO ACTIVATE" : "CLICK TO FIRE · CAMERA LOCKED"}</span>
+      <span className="diorama-hint" aria-hidden="true">{variant === "nod" ? "MOVE AROUND HIS FACE · NO CLICK NEEDED" : orbitable ? "DRAG TO ORBIT · TAP TO ACTIVATE" : "TAP TO ACTIVATE"}</span>
     </div>
   );
 }
