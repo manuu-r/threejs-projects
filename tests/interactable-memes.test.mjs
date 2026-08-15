@@ -30,25 +30,30 @@ test("server-renders the interactable memes experience", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Interactable Memes — Memes You Can Orbit · Three\.js Fun<\/title>/i);
-  assert.match(html, /MEMES YOU/);
-  assert.match(html, /CAN ORBIT\./);
+  assert.match(html, /THE MEME\./);
+  assert.match(html, /THEN THE WORLD\./);
   assert.match(html, /RESET THE LAB/);
-  assert.match(html, /Five experiments in serious nonsense/);
-  assert.match(html, /3D OFFICE CROSSFIRE/);
-  assert.match(html, /3D VINYL PURR-SUASION/);
-  assert.match(html, /3D EFFORT REACTOR/);
-  assert.match(html, /3D PLACEBO PROTOCOL/);
+  assert.match(html, /The original joke, now with polygons/);
+  assert.match(html, /OFFICE CROSSFIRE/);
+  assert.match(html, /VINYL PURR-SUASION/);
+  assert.match(html, /EFFORT REACTOR/);
+  assert.match(html, /PLACEBO PROTOCOL/);
   assert.match(html, /CLIENT DEMO STABILIZER/);
   assert.match(html, /THREE\.JS/);
   assert.match(html, /LOADING 3D CHARACTERS/);
-  assert.match(html, /Five meme casts rebuilt as actual Three\.js characters/);
-  assert.doesNotMatch(html, /finger-guns\.png|dj-cat\.png|radioactive-dinosaur\.png|brain-pill\.png|client-demo\.png/);
+  assert.match(html, /ORIGINAL MEME/);
+  assert.match(html, /INTERACTIVE 3D REMAKE/);
+  assert.match(html, /finger-guns\.png/);
+  assert.match(html, /dj-cat\.png/);
+  assert.match(html, /radioactive-dinosaur\.png/);
+  assert.match(html, /brain-pill\.png/);
+  assert.match(html, /client-demo\.png/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
 test("ships the licensed 3D character models used by the meme scenes", () => {
   const modelDirectory = new URL("../public/interactable-memes/models/", import.meta.url);
-  for (const filename of ["business-man.glb", "cat.glb", "gorilla.glb", "trex.glb"]) {
+  for (const filename of ["business-man.glb", "cat.glb", "gorilla.glb", "trex.glb", "small-airplane.glb"]) {
     const model = new URL(filename, modelDirectory);
     assert.equal(existsSync(model), true, `${filename} is missing`);
     assert.ok(statSync(model).size > 10_000, `${filename} is unexpectedly small`);

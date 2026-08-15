@@ -44,6 +44,7 @@ const MODEL_URLS = {
   cat: "/interactable-memes/models/cat.glb",
   gorilla: "/interactable-memes/models/gorilla.glb",
   trex: "/interactable-memes/models/trex.glb",
+  airplane: "/interactable-memes/models/small-airplane.glb",
 };
 
 function material(color: THREE.ColorRepresentation, emissive = 0, roughness = 0.58) {
@@ -53,6 +54,7 @@ function material(color: THREE.ColorRepresentation, emissive = 0, roughness = 0.
     emissiveIntensity: emissive,
     metalness: 0.12,
     roughness,
+    flatShading: true,
   });
 }
 
@@ -79,6 +81,13 @@ function setModelShadows(object: THREE.Object3D) {
     if (child instanceof THREE.Mesh) {
       child.castShadow = true;
       child.receiveShadow = true;
+      const surfaces = Array.isArray(child.material) ? child.material : [child.material];
+      surfaces.forEach((surface) => {
+        if (surface instanceof THREE.MeshStandardMaterial) {
+          surface.flatShading = true;
+          surface.needsUpdate = true;
+        }
+      });
     }
   });
 }
@@ -93,6 +102,40 @@ function normalizeModel(object: THREE.Object3D, targetHeight: number) {
   object.position.x -= center.x;
   object.position.y -= fitted.min.y;
   object.position.z -= center.z;
+}
+
+function normalizeModelSpan(object: THREE.Object3D, targetSpan: number) {
+  const initial = new THREE.Box3().setFromObject(object);
+  const size = initial.getSize(new THREE.Vector3());
+  const scale = targetSpan / Math.max(size.x, size.y, size.z, 0.001);
+  object.scale.setScalar(scale);
+  const fitted = new THREE.Box3().setFromObject(object);
+  const center = fitted.getCenter(new THREE.Vector3());
+  object.position.sub(center);
+}
+
+function addCatGlasses(parent: THREE.Object3D) {
+  const glasses = new THREE.Group();
+  const black = material(0x080808, 0.02, 0.18);
+  const white = material(0xffffff, 0.18, 0.2);
+  for (const x of [-0.27, 0.27]) {
+    addMesh(glasses, new THREE.BoxGeometry(0.42, 0.24, 0.08), black, [x, 0, 0]);
+    addMesh(glasses, new THREE.BoxGeometry(0.12, 0.045, 0.012), white, [x - 0.06, 0.03, 0.049], [0, 0, -.38]);
+  }
+  addMesh(glasses, new THREE.BoxGeometry(0.18, 0.055, 0.065), black, [0, 0.01, 0]);
+  glasses.position.set(0, 1.62, 0.55);
+  parent.add(glasses);
+}
+
+function addSpeaker(parent: THREE.Object3D, x: number) {
+  const speaker = new THREE.Group();
+  addMesh(speaker, new THREE.BoxGeometry(1.1, 2.15, .58), material(0x14131a, 0, .3), [0, 0, 0]);
+  for (const y of [-.53, .48]) {
+    addMesh(speaker, new THREE.CylinderGeometry(.34, .34, .08, 20), material(0x272331, 0, .24), [0, y, .34], [Math.PI / 2, 0, 0]);
+    addMesh(speaker, new THREE.CylinderGeometry(.12, .12, .09, 16), material(0x7756ff, .3, .22), [0, y, .39], [Math.PI / 2, 0, 0]);
+  }
+  speaker.position.set(x, -.25, -1.48);
+  parent.add(speaker);
 }
 
 function makeTextPanel(text: string, width: number, height: number, accent: string, inverse = false) {
@@ -374,11 +417,11 @@ export function MemeDiorama({
     mount.appendChild(renderer.domElement);
 
     const backgrounds: Record<DioramaVariant, number> = {
-      crossfire: 0x7f7467,
-      scratch: 0x5b3fcc,
-      reactor: 0x739c47,
-      brain: 0x82cae8,
-      demo: 0x79bce2,
+      crossfire: 0x171513,
+      scratch: 0x120c20,
+      reactor: 0x12180c,
+      brain: 0x07191e,
+      demo: 0x181208,
     };
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(backgrounds[variant]);
@@ -386,16 +429,16 @@ export function MemeDiorama({
     const camera = new THREE.PerspectiveCamera(hero ? 34 : 38, 1, 0.1, 100);
     camera.position.set(0, hero ? 0.25 : 0.15, hero ? 8.9 : 8.2);
 
-    scene.add(new THREE.HemisphereLight(0xfff7e9, 0x24211f, 2.25));
+    scene.add(new THREE.HemisphereLight(0xfff7e9, 0x17131f, 1.65));
     const key = new THREE.DirectionalLight(0xffffff, 5.2);
     key.position.set(-4, 7, 6);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
     scene.add(key);
-    const rim = new THREE.PointLight(new THREE.Color(accent), 26, 13);
+    const rim = new THREE.PointLight(new THREE.Color(accent), 36, 13);
     rim.position.set(4.3, 1.4, 3.5);
     scene.add(rim);
-    const fill = new THREE.PointLight(0x7d66ff, 12, 10);
+    const fill = new THREE.PointLight(0x7d66ff, 18, 10);
     fill.position.set(-4, -0.5, 3);
     scene.add(fill);
 
@@ -427,7 +470,7 @@ export function MemeDiorama({
       return panel;
     }
 
-    async function loadCharacter(url: string, targetHeight: number, position: [number, number, number], rotationY = 0) {
+    async function loadCharacter(url: string, targetSize: number, position: [number, number, number], rotationY = 0, fit: "height" | "span" = "height") {
       const gltf = await loader.loadAsync(url);
       if (disposed) {
         gltf.scene.traverse((object) => {
@@ -436,7 +479,8 @@ export function MemeDiorama({
         return null;
       }
       const wrapper = new THREE.Group();
-      normalizeModel(gltf.scene, targetHeight);
+      if (fit === "span") normalizeModelSpan(gltf.scene, targetSize);
+      else normalizeModel(gltf.scene, targetSize);
       setModelShadows(gltf.scene);
       wrapper.add(gltf.scene);
       wrapper.position.set(...position);
@@ -479,6 +523,8 @@ export function MemeDiorama({
     if (variant === "scratch") {
       addBrickWall(root);
       addPanel("DJ CAT / LIVE", 2.55, 0.52, [0, 2.45, -1.7], [0, 0, 0.02], true);
+      addSpeaker(root, -3.2);
+      addSpeaker(root, 3.2);
       const left = makeTurntable(root, -1.23, accent);
       const right = makeTurntable(root, 1.23, accent);
       actors.platters.push(left.disc, right.disc);
@@ -489,6 +535,7 @@ export function MemeDiorama({
       void loadCharacter(MODEL_URLS.cat, 2.25, [0, -0.95, 0.1], 0).then((loaded) => {
         if (!loaded) return;
         actors.cat = loaded.wrapper;
+        addCatGlasses(loaded.wrapper);
         const mixer = new THREE.AnimationMixer(loaded.gltf.scene);
         mixers.push(mixer);
         const headbutt = findClip(loaded.gltf, "Headbutt") ?? findClip(loaded.gltf, "Idle");
@@ -565,6 +612,13 @@ export function MemeDiorama({
       plane.scale.setScalar(0.92);
       root.add(plane);
       actors.plane = plane;
+      void loadCharacter(MODEL_URLS.airplane, 4.5, [1.55, 0.25, 0.2], Math.PI / 2, "span").then((loaded) => {
+        if (!loaded) return;
+        plane.visible = false;
+        loaded.wrapper.rotation.x = 0.06;
+        loaded.wrapper.rotation.z = -0.12;
+        actors.plane = loaded.wrapper;
+      });
     }
 
     let targetX = hero ? -0.04 : -0.08;
