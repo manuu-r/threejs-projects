@@ -12,13 +12,13 @@ export const metadata: Metadata = {
     title,
     description,
     type: "website",
-    images: [{ url: "/interactable-memes/og-v3.png", width: 1200, height: 630 }],
+    images: [{ url: "/interactable-memes/og-v4.png", width: 1672, height: 941 }],
   },
   twitter: {
     card: "summary_large_image",
     title,
     description,
-    images: ["/interactable-memes/og-v3.png"],
+    images: ["/interactable-memes/og-v4.png"],
   },
 };
 

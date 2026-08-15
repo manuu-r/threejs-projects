@@ -80,16 +80,23 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
 .enter-button span { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; background: var(--acid); color: var(--ink); }
 .enter-button:hover span { animation: button-hop 500ms ease; }
 
-.hero-stack { position: absolute; z-index: 3; top: 15%; right: 4vw; width: min(38vw, 530px); height: 72%; perspective: 1300px; }
-.stack-card { position: absolute; inset: 8% 2% 8% 5%; padding: 9px 9px 42px; border: 1px solid var(--ink); background: var(--paper); box-shadow: 0 28px 70px rgba(0, 0, 0, 0.38); color: var(--ink); transition: transform 350ms cubic-bezier(.2,.8,.2,1), z-index 0s; }
-.stack-card img { width: 100%; height: 100%; object-fit: cover; filter: saturate(0.86) contrast(1.04); }
-.stack-card span { position: absolute; bottom: 14px; left: 15px; font: 900 10px/1 "Courier New", monospace; letter-spacing: 0.08em; }
-.stack-card-one { z-index: 4; transform: rotate(2deg) translate(2%, 2%); }
-.stack-card-two { z-index: 3; transform: rotate(-6deg) translate(-13%, 0); }
-.stack-card-three { z-index: 2; transform: rotate(9deg) translate(9%, -1%); }
-.stack-card-four { z-index: 1; transform: rotate(-12deg) translate(-6%, 1%); }
-.stack-card-five { z-index: 0; transform: rotate(14deg) translate(8%, 2%); }
-.stack-card:hover, .stack-card:focus-visible { z-index: 10; outline: 3px solid var(--acid); transform: rotate(0) translate(-10%, -2%) scale(1.03); }
+.hero-character-stage {
+  position: absolute;
+  z-index: 3;
+  top: 14%;
+  right: 3vw;
+  width: min(45vw, 690px);
+  height: 70%;
+  border: 1px solid rgba(240,237,228,.7);
+  box-shadow: 22px 26px 0 rgba(216,255,56,.85);
+  background: #7f7467;
+  transform: rotate(1deg);
+}
+.hero-character-stage .diorama-stage { min-height: 0; height: calc(100% - 42px); }
+.hero-scene-nav { height: 42px; display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1px solid var(--ink); background: var(--paper); color: var(--ink); }
+.hero-scene-nav a { display: grid; place-items: center; border-right: 1px solid var(--ink); font: 900 8px/1 "Courier New", monospace; letter-spacing: .05em; transition: 140ms ease; }
+.hero-scene-nav a:last-child { border-right: 0; }
+.hero-scene-nav a:hover, .hero-scene-nav a:focus-visible { outline: 0; background: var(--acid); transform: translateY(-3px); }
 .hero-footer { position: absolute; z-index: 5; bottom: 20px; left: 28px; right: 28px; display: flex; justify-content: space-between; color: rgba(240,237,228,.55); font: 700 9px/1 "Courier New", monospace; letter-spacing: .1em; }
 
 .meme-room { min-height: 100svh; display: grid; grid-template-columns: minmax(280px, .78fr) minmax(460px, 1.22fr); gap: clamp(32px, 6vw, 100px); align-items: center; padding: clamp(94px, 10vw, 150px) clamp(24px, 5vw, 80px); border-bottom: 1px solid var(--line); }
@@ -126,12 +133,11 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
   font: 1000 clamp(120px, 18vw, 280px)/.75 Arial, sans-serif;
   letter-spacing: -.12em;
 }
-.diorama-canvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; outline: none; }
+.diorama-canvas { position: absolute; z-index: 2; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; outline: none; }
 .diorama-canvas:active { cursor: grabbing; }
 .diorama-canvas:focus-visible { box-shadow: inset 0 0 0 4px var(--acid); }
 .diorama-hint { position: absolute; z-index: 5; left: 12px; bottom: 12px; padding: 8px 10px; border: 1px solid rgba(17,17,15,.62); border-radius: 999px; background: rgba(240,237,228,.82); color: var(--ink); backdrop-filter: blur(8px); font: 900 8px/1 "Courier New", monospace; letter-spacing: .07em; pointer-events: none; }
-.diorama-stage > img { width: 100%; height: 100%; object-fit: contain; }
-.diorama-fallback { position: absolute; inset: 0; }
+.webgl-fallback { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(17,17,15,.68); font: 900 10px/1 "Courier New", monospace; letter-spacing: .1em; }
 
 .room-standoff { background: var(--acid); }
 .room-standoff .room-copy h2 em { color: #674aff; }
@@ -228,6 +234,8 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
 .manifesto-grid { display: grid; grid-template-columns: minmax(240px, 520px) 1fr; gap: 12vw; margin-top: 76px; padding-top: 24px; border-top: 1px solid rgba(240,237,228,.24); line-height: 1.6; }
 .aside-copy { margin: 0; font: 700 12px/1.7 "Courier New", monospace; letter-spacing: .08em; }
 .aside-copy strong { color: var(--acid); }
+.asset-credits { max-width: 900px; margin: 48px 0 0; color: rgba(240,237,228,.58); font: 700 9px/1.7 "Courier New", monospace; letter-spacing: .045em; }
+.asset-credits a { color: var(--acid); text-decoration: underline; text-underline-offset: 3px; }
 .back-to-top { display: inline-block; margin-top: 52px; padding-bottom: 5px; border-bottom: 1px solid currentColor; font-size: 10px; font-weight: 900; letter-spacing: .1em; }
 
 @keyframes live-pulse { 50% { opacity: .3; } }
@@ -249,7 +257,7 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
   .hero::before { display: none; }
   .hero-copy { width: 100%; padding: 82px 20px 50px; }
   h1 { font-size: clamp(61px, 17vw, 118px); }
-  .hero-stack { position: relative; top: auto; right: auto; width: 78vw; height: 62vw; margin: 0 auto 60px; }
+  .hero-character-stage { position: relative; top: auto; right: auto; width: calc(100% - 40px); height: min(68vw, 600px); min-height: 430px; margin: 0 auto 68px; }
   .hero-footer { bottom: 20px; }
   .hero-footer span:last-child { display: none; }
   .meme-room { min-height: auto; grid-template-columns: 1fr; padding-top: 105px; padding-bottom: 115px; }
@@ -266,8 +274,8 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
   .hero { padding-top: 62px; }
   .hero-copy { padding-top: 70px; }
   .eyebrow { font-size: 9px; }
-  .hero-stack { width: 82vw; height: 86vw; }
-  .stack-card { inset: 7% 0 7% 2%; }
+  .hero-character-stage { width: calc(100% - 28px); height: 118vw; min-height: 470px; box-shadow: 10px 12px 0 rgba(216,255,56,.85); }
+  .hero-scene-nav a { font-size: 6px; }
   .room-copy h2 { font-size: clamp(50px, 15vw, 76px); }
   .meme-room { gap: 46px; padding-inline: 18px; }
   .machine { box-shadow: 9px 9px 0 currentColor; }

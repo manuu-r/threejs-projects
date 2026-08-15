@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync, statSync } from "node:fs";
 import test from "node:test";
 
 async function render() {
@@ -39,18 +40,25 @@ test("server-renders the interactable memes experience", async () => {
   assert.match(html, /3D PLACEBO PROTOCOL/);
   assert.match(html, /CLIENT DEMO STABILIZER/);
   assert.match(html, /THREE\.JS/);
-  assert.match(html, /finger-guns\.png/);
-  assert.match(html, /dj-cat\.png/);
-  assert.match(html, /radioactive-dinosaur\.png/);
-  assert.match(html, /brain-pill\.png/);
-  assert.match(html, /client-demo\.png/);
+  assert.match(html, /LOADING 3D CHARACTERS/);
+  assert.match(html, /Five meme casts rebuilt as actual Three\.js characters/);
+  assert.doesNotMatch(html, /finger-guns\.png|dj-cat\.png|radioactive-dinosaur\.png|brain-pill\.png|client-demo\.png/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
+});
+
+test("ships the licensed 3D character models used by the meme scenes", () => {
+  const modelDirectory = new URL("../public/interactable-memes/models/", import.meta.url);
+  for (const filename of ["business-man.glb", "cat.glb", "gorilla.glb", "trex.glb"]) {
+    const model = new URL(filename, modelDirectory);
+    assert.equal(existsSync(model), true, `${filename} is missing`);
+    assert.ok(statSync(model).size > 10_000, `${filename} is unexpectedly small`);
+  }
 });
 
 test("ships absolute social preview metadata", async () => {
   const response = await render();
   const html = await response.text();
 
-  assert.match(html, /property="og:image" content="http:\/\/localhost:3000\/interactable-memes\/og-v3\.png"/i);
+  assert.match(html, /property="og:image" content="http:\/\/localhost:3000\/interactable-memes\/og-v4\.png"/i);
   assert.match(html, /name="twitter:card" content="summary_large_image"/i);
 });

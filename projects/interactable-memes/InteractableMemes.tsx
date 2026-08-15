@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useState } from "react";
 import { MemeDiorama } from "./MemeDiorama";
 
@@ -59,33 +58,22 @@ export default function InteractableMemes() {
           <p className="eyebrow"><span>LIVE 3D</span> Five experiments in serious nonsense</p>
           <h1>MEMES YOU<br /><em>CAN ORBIT.</em></h1>
           <p className="intro">
-            Five flat internet artifacts rebuilt as tiny Three.js dioramas—with
-            depth, props, wobble, dramatic lighting, and inadvisable controls.
+            Five meme casts rebuilt as actual Three.js characters, creatures,
+            vehicles, sets, and props—with depth, animation, and inadvisable controls.
           </p>
           <a className="enter-button" href="#standoff">ENTER THE 3D LAB <span>↓</span></a>
         </div>
 
-        <div className="hero-stack" aria-label="Five interactive 3D meme previews">
-          <a className="stack-card stack-card-one" href="#standoff">
-            <Image src="/interactable-memes/source/finger-guns.png" alt="Office finger-gun standoff" width={708} height={534} priority />
-            <span>01 / CROSSFIRE</span>
-          </a>
-          <a className="stack-card stack-card-two" href="#scratch">
-            <Image src="/interactable-memes/source/dj-cat.png" alt="Cat DJ at a turntable" width={744} height={402} />
-            <span>02 / DJ CAT</span>
-          </a>
-          <a className="stack-card stack-card-three" href="#reactor">
-            <Image src="/interactable-memes/source/radioactive-dinosaur.png" alt="Gorilla radioactive dinosaur meme" width={720} height={463} />
-            <span>03 / REACTOR</span>
-          </a>
-          <a className="stack-card stack-card-four" href="#brain">
-            <Image src="/interactable-memes/source/brain-pill.png" alt="Morty agrees to take a pill meme" width={500} height={488} />
-            <span>04 / BRAIN</span>
-          </a>
-          <a className="stack-card stack-card-five" href="#demo">
-            <Image src="/interactable-memes/source/client-demo.png" alt="Excavator holding up an airplane" width={1453} height={1094} />
-            <span>05 / CLIENT DEMO</span>
-          </a>
+        <div className="hero-character-stage" aria-label="Interactive 3D character preview">
+          <MemeDiorama
+            variant="crossfire"
+            accent="#d8ff38"
+            hero
+            ariaLabel="Interactive 3D suited office character surrounded by finger guns. Drag to orbit."
+          />
+          <nav className="hero-scene-nav" aria-label="Jump to a 3D meme scene">
+            <a href="#standoff">01 MAN</a><a href="#scratch">02 CAT</a><a href="#reactor">03 BEASTS</a><a href="#brain">04 BRAIN</a><a href="#demo">05 CHAOS</a>
+          </nav>
         </div>
 
         <div className="hero-footer" aria-hidden="true">
@@ -105,9 +93,6 @@ export default function InteractableMemes() {
         <div className="machine machine-standoff">
           <div className="machine-label"><span>THREE.JS GESTURE RECONSTRUCTION</span><span>ARMED</span></div>
           <MemeDiorama
-            src="/interactable-memes/source/finger-guns.png"
-            imageWidth={708}
-            imageHeight={534}
             variant="crossfire"
             accent="#d8ff38"
             motion={shotCount}
@@ -136,9 +121,6 @@ export default function InteractableMemes() {
         <div className="machine machine-scratch">
           <div className="machine-label"><span>FELINE FREQUENCY MODULATOR / WEBGL</span><span>{isPlaying ? `${bpm} BPM` : "PAUSED"}</span></div>
           <MemeDiorama
-            src="/interactable-memes/source/dj-cat.png"
-            imageWidth={744}
-            imageHeight={402}
             variant="scratch"
             accent="#d8ff38"
             motion={isPlaying ? 1 : 0}
@@ -163,9 +145,6 @@ export default function InteractableMemes() {
         <div className={`machine machine-reactor reactor-level-${reactorLevel}`}>
           <div className="machine-label"><span>UNLICENSED 3D MOTIVATION CHAMBER</span><span>{levels[reactorLevel]}</span></div>
           <MemeDiorama
-            src="/interactable-memes/source/radioactive-dinosaur.png"
-            imageWidth={720}
-            imageHeight={463}
             variant="reactor"
             accent="#d8ff38"
             motion={reactorLevel}
@@ -189,9 +168,6 @@ export default function InteractableMemes() {
         <div className={`machine machine-brain dose-${Math.min(pillDoses, 3)}`}>
           <div className="machine-label"><span>VOLUMETRIC DECISION OVERRIDE</span><span>{pillDoses} DOSE{pillDoses === 1 ? "" : "S"}</span></div>
           <MemeDiorama
-            src="/interactable-memes/source/brain-pill.png"
-            imageWidth={500}
-            imageHeight={488}
             variant="brain"
             accent="#ef334e"
             motion={pillDoses}
@@ -215,9 +191,6 @@ export default function InteractableMemes() {
         <div className={`machine machine-demo demo-level-${demoLevel}`}>
           <div className="machine-label"><span>PRODUCTION READINESS SIMULATOR / ALLEGEDLY 3D</span><span>{12 + demoLevel * 22}% STABLE</span></div>
           <MemeDiorama
-            src="/interactable-memes/source/client-demo.png"
-            imageWidth={1453}
-            imageHeight={1094}
             variant="demo"
             accent="#ffdc3d"
             motion={demoLevel}
@@ -232,9 +205,12 @@ export default function InteractableMemes() {
         <p className="manifesto-index">06 / FIELD NOTES</p>
         <h2>Memes were never meant to sit still.<br /><span>Now they refuse to stay flat.</span></h2>
         <div className="manifesto-grid">
-          <p>Five images entered the lab. They left as lit, orbitable 3D dioramas with props, controls, questionable physics, and a much stronger sense of agency.</p>
+          <p>Five references entered the lab. Their characters left as modeled, lit, orbitable 3D scenes with controls, questionable physics, and a much stronger sense of agency.</p>
           <p className="aside-copy">BUILT WITH THREE.JS<br />POINTERS + TOUCHSCREENS WELCOME<br /><strong>DEPTH: UNNECESSARY</strong></p>
         </div>
+        <p className="asset-credits">
+          3D character assets: <a href="https://poly.pizza/m/JFrLIKqvCH">Business Man</a>, <a href="https://poly.pizza/m/qKICY6xla2">Cat</a>, and <a href="https://poly.pizza/m/UYtneO5FpF">T-Rex</a> by Quaternius (CC0); <a href="https://poly.pizza/m/bmfQ1j9CeO2">Gorilla</a> by Poly by Google (CC BY 3.0). Other characters and vehicles modeled in Three.js.
+        </p>
         <a className="back-to-top" href="#top">RUN THE EXPERIMENT AGAIN ↑</a>
       </footer>
     </main>
