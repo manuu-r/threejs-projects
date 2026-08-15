@@ -86,6 +86,7 @@ h1 em { color: var(--acid); font-family: Georgia, "Times New Roman", serif; font
 .diorama-canvas { position: absolute; z-index: 2; inset: 0; width: 100%; height: 100%; display: block; opacity: 0; cursor: grab; touch-action: none; outline: none; transition: opacity 700ms ease; }
 .diorama-stage.is-ready .diorama-canvas { opacity: 1; }
 .diorama-canvas:active { cursor: grabbing; }
+.diorama-canvas.is-click-only, .diorama-canvas.is-click-only:active { cursor: crosshair; touch-action: manipulation; }
 .diorama-canvas:focus-visible { box-shadow: inset 0 0 0 4px var(--acid); }
 .diorama-hint { position: absolute; z-index: 5; left: 12px; bottom: 12px; padding: 8px 10px; border: 1px solid rgba(240,237,228,.4); border-radius: 999px; background: rgba(12,12,12,.7); color: var(--paper); backdrop-filter: blur(8px); font: 900 8px/1 "Courier New", monospace; letter-spacing: .07em; pointer-events: none; }
 .diorama-engine { position: absolute; z-index: 5; top: 12px; right: 12px; padding: 8px 10px; border: 1px solid rgba(240,237,228,.28); background: rgba(7,7,9,.68); color: var(--acid); font: 900 8px/1 "Courier New", monospace; letter-spacing: .08em; pointer-events: none; }

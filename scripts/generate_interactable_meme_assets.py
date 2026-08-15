@@ -352,10 +352,10 @@ def import_glb_group(
     low, high = world_bounds(imported)
     center = (low + high) * 0.5
     target = Vector(location)
-    if center_location:
-        wrapper.location += target - center
-    else:
-        wrapper.location += target - Vector((center.x, center.y, low.z))
+    anchor = center if center_location else Vector((center.x, center.y, low.z))
+    world_matrix = wrapper.matrix_world.copy()
+    world_matrix.translation += target - anchor
+    wrapper.matrix_world = world_matrix
     bpy.context.view_layer.update()
 
     for obj in hierarchy_meshes(imported):
@@ -400,16 +400,16 @@ def pose_webxr_finger_gun(objects: list[bpy.types.Object]) -> None:
         return
     for finger in ("middle", "ring", "pinky"):
         for joint, curl in (
-            ("metacarpal", 0.42),
-            ("phalanx-proximal", 1.35),
-            ("phalanx-intermediate", 1.45),
-            ("phalanx-distal", 1.08),
+            ("metacarpal", 0.18),
+            ("phalanx-proximal", 1.5),
+            ("phalanx-intermediate", 1.72),
+            ("phalanx-distal", 1.32),
         ):
             bone = rig.pose.bones.get(f"{finger}-finger-{joint}")
             if not bone:
                 continue
             bone.rotation_mode = "XYZ"
-            bone.rotation_euler.y = curl
+            bone.rotation_euler.x = curl
     bpy.context.view_layer.update()
 
 
@@ -438,7 +438,7 @@ def make_finger_gun(name: str, loc: tuple[float, float, float], side: int, paren
         target_size=2.05,
         location=loc,
         fit="span",
-        rotation=(0, -side * math.pi / 2, 0),
+        rotation=(side * 0.16, -side * math.pi / 2, side * 0.08),
         center_location=True,
     )
     pose_webxr_finger_gun(imported)
@@ -735,7 +735,7 @@ def build_brain() -> bpy.types.Object:
     return root
 
 
-def make_excavator(root: bpy.types.Object) -> tuple[bpy.types.Object, bpy.types.Object]:
+def make_excavator(root: bpy.types.Object) -> tuple[bpy.types.Object, bpy.types.Object, bpy.types.Object]:
     rig = empty("Excavator", root)
     yellow = material("Excavator yellow", PALETTE["yellow"], roughness=0.48, metallic=0.08)
     dark = material("Excavator tracks", "#242325", roughness=0.52, metallic=0.12)
@@ -748,23 +748,29 @@ def make_excavator(root: bpy.types.Object) -> tuple[bpy.types.Object, bpy.types.
             cylinder(f"TrackWheel_{side}_{index}", (-2.65 + index * 0.38, y - side * 0.32, 0.47), 0.22, 0.1, wheel, vertices=12, rot=(math.pi / 2, 0, 0), parent=rig)
         for index in range(10):
             box(f"TrackPad_{side}_{index}", (-2.8 + index * 0.27, y - side * 0.36, 0.74 if index < 5 else 0.2), (0.12, 0.06, 0.055), dark, bevel=0.02, parent=rig)
-    box("ExcavatorBase", (-1.55, 0, 1.02), (1.15, 0.7, 0.32), yellow, bevel=0.12, parent=rig)
-    box("ExcavatorCounterweight", (-2.25, 0.05, 1.65), (0.75, 0.7, 0.55), yellow, bevel=0.16, parent=rig)
-    box("ExcavatorCab", (-1.1, -0.05, 1.74), (0.58, 0.63, 0.7), glass, bevel=0.09, parent=rig)
-    for x in (-1.68, -0.52):
-        segment(f"CabFrame_{x}", (x, -0.68, 1.08), (x, -0.68, 2.42), 0.045, dark, parent=rig)
-    arm = empty("ExcavatorArm", rig)
-    segment("ExcavatorBoom", (-0.65, 0, 1.82), (0.95, 0, 3.42), 0.25, yellow, end_radius=0.18, parent=arm)
-    segment("ExcavatorStick", (0.95, 0, 3.42), (2.5, 0, 3.04), 0.19, yellow, end_radius=0.13, parent=arm)
-    segment("BoomHydraulic", (-0.5, -0.28, 2.0), (1.18, -0.28, 3.16), 0.065, wheel, end_radius=0.045, parent=arm)
-    segment("StickHydraulic", (0.88, -0.22, 3.25), (2.38, -0.22, 3.0), 0.05, wheel, end_radius=0.035, parent=arm)
-    box("ExcavatorBucket", (2.72, 0, 2.82), (0.52, 0.72, 0.24), dark, rot=(0, 0.18, 0), bevel=0.1, parent=arm)
+    box("ExcavatorUndercarriage", (-1.55, 0, 0.92), (1.22, 0.78, 0.18), dark, bevel=0.12, parent=rig)
+
+    pivot = Vector((-1.55, 0, 1.02))
+    upper = empty("ExcavatorUpper", rig)
+    upper.location = pivot
+    box("ExcavatorTurntable", (0, 0, 0), (1.15, 0.7, 0.32), yellow, bevel=0.12, parent=upper)
+    box("ExcavatorCounterweight", (-0.7, 0.05, 0.63), (0.75, 0.7, 0.55), yellow, bevel=0.16, parent=upper)
+    box("ExcavatorCab", (0.45, -0.05, 0.72), (0.58, 0.63, 0.7), glass, bevel=0.09, parent=upper)
+    for x in (-0.13, 1.03):
+        segment(f"CabFrame_{x}", (x, -0.68, 0.06), (x, -0.68, 1.4), 0.045, dark, parent=upper)
+
+    arm = empty("ExcavatorArm", upper)
+    segment("ExcavatorBoom", (0.9, 0, 0.8), (2.5, 0, 2.4), 0.25, yellow, end_radius=0.18, parent=arm)
+    segment("ExcavatorStick", (2.5, 0, 2.4), (4.05, 0, 2.02), 0.19, yellow, end_radius=0.13, parent=arm)
+    segment("BoomHydraulic", (1.05, -0.28, 0.98), (2.73, -0.28, 2.14), 0.065, wheel, end_radius=0.045, parent=arm)
+    segment("StickHydraulic", (2.43, -0.22, 2.23), (3.93, -0.22, 1.98), 0.05, wheel, end_radius=0.035, parent=arm)
+    box("ExcavatorBucket", (4.27, 0, 1.8), (0.52, 0.72, 0.24), dark, rot=(0, 0.18, 0), bevel=0.1, parent=arm)
     for side in (-1, 1):
-        segment(f"PlaneCradle_{side}", (2.48, side * 0.58, 2.96), (1.62, side * 0.58, 3.12), 0.065, dark, end_radius=0.05, parent=arm)
-        box(f"PlaneClamp_{side}", (1.56, side * 0.58, 3.24), (0.1, 0.13, 0.24), yellow, rot=(0, -0.25, 0), bevel=0.05, parent=arm)
+        segment(f"PlaneCradle_{side}", (4.03, side * 0.5, 1.98), (4.55, side * 0.5, 2.34), 0.075, dark, end_radius=0.055, parent=arm)
+        box(f"PlaneClamp_{side}", (4.62, side * 0.5, 2.44), (0.12, 0.14, 0.25), yellow, rot=(0, -0.32, 0), bevel=0.05, parent=arm)
     for index in range(5):
-        cone(f"BucketTooth_{index}", (3.08, -0.52 + index * 0.26, 2.73), 0.065, 0, 0.25, dark, vertices=6, rot=(0, math.pi / 2, 0), parent=arm)
-    return rig, arm
+        cone(f"BucketTooth_{index}", (4.63, -0.52 + index * 0.26, 1.71), 0.065, 0, 0.25, dark, vertices=6, rot=(0, math.pi / 2, 0), parent=arm)
+    return rig, upper, arm
 
 
 def make_plane(parent: bpy.types.Object) -> bpy.types.Object:
@@ -772,8 +778,8 @@ def make_plane(parent: bpy.types.Object) -> bpy.types.Object:
         LICENSED_MODEL_DIR / "small-airplane.glb",
         "PlaneRig",
         parent,
-        target_size=4.75,
-        location=(1.25, 0, 3.55),
+        target_size=4.2,
+        location=(3.1, 0, 3.62),
         fit="span",
         center_location=True,
         rotation=(0, -0.04, -0.05),
@@ -796,7 +802,7 @@ def build_demo() -> bpy.types.Object:
         angle = index * 2.3
         radius = 3.1 + (index % 4) * 0.22
         ico(f"DemoRock_{index}", (math.cos(angle) * radius, math.sin(angle) * radius * 0.68, 0.32), (0.2 + index % 3 * 0.08, 0.22, 0.18), sand, subdivisions=1, rot=(angle, 0.3, angle * 0.5), parent=root)
-    _, arm = make_excavator(root)
+    _, _, arm = make_excavator(root)
     make_plane(arm)
     return root
 

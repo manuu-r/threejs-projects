@@ -14,6 +14,7 @@ type MemeDioramaProps = {
   motion?: number;
   speed?: number;
   hero?: boolean;
+  orbitable?: boolean;
   onAction?: () => void;
   onDragStart?: () => void;
 };
@@ -43,6 +44,7 @@ type SceneActors = {
   plane?: THREE.Object3D;
   propeller?: THREE.Object3D;
   excavatorArm?: THREE.Object3D;
+  excavatorUpper?: THREE.Object3D;
 };
 
 const SCENE_URLS: Record<DioramaVariant, string> = {
@@ -117,6 +119,7 @@ function collectActors(asset: THREE.Object3D): SceneActors {
     plane: asset.getObjectByName("PlaneRig"),
     propeller: asset.getObjectByName("Propeller"),
     excavatorArm: asset.getObjectByName("ExcavatorArm"),
+    excavatorUpper: asset.getObjectByName("ExcavatorUpper"),
   };
 
   Object.values(actors).forEach((entry) => {
@@ -161,6 +164,7 @@ export function MemeDiorama({
   motion = 0,
   speed = 118,
   hero = false,
+  orbitable = true,
   onAction,
   onDragStart,
 }: MemeDioramaProps) {
@@ -198,7 +202,7 @@ export function MemeDiorama({
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.12;
-    renderer.domElement.className = "diorama-canvas";
+    renderer.domElement.className = `diorama-canvas${orbitable ? "" : " is-click-only"}`;
     renderer.domElement.tabIndex = 0;
     renderer.domElement.setAttribute("role", "button");
     renderer.domElement.setAttribute("aria-label", labelRef.current);
@@ -249,6 +253,7 @@ export function MemeDiorama({
     let impact = 0;
     let scratchVelocity = 0;
     let previousMotion = stateRef.current.motion;
+    let fallProgress = stateRef.current.motion > 0 ? 1 : 0;
     const timer = new THREE.Timer();
     timer.connect(document);
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -307,12 +312,12 @@ export function MemeDiorama({
       dragged = false;
       lastX = event.clientX;
       lastY = event.clientY;
-      dragStartRef.current?.();
+      if (orbitable) dragStartRef.current?.();
       renderer.domElement.setPointerCapture(event.pointerId);
     }
 
     function onPointerMove(event: PointerEvent) {
-      if (!dragging) return;
+      if (!dragging || !orbitable) return;
       const dx = event.clientX - lastX;
       const dy = event.clientY - lastY;
       if (Math.abs(dx) + Math.abs(dy) > 4) dragged = true;
@@ -339,7 +344,7 @@ export function MemeDiorama({
         event.preventDefault();
         activate();
       }
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      if (orbitable && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
         event.preventDefault();
         targetY += event.key === "ArrowLeft" ? -0.22 : 0.22;
       }
@@ -361,16 +366,30 @@ export function MemeDiorama({
     }
 
     function animateActors(elapsed: number, delta: number) {
-      if (!actors || reducedMotion) return;
+      if (!actors) return;
       const live = stateRef.current;
       if (variant === "crossfire") {
+        const fallTarget = live.motion > 0 ? 1 : 0;
+        fallProgress = reducedMotion
+          ? fallTarget
+          : THREE.MathUtils.clamp(fallProgress + delta * (fallTarget ? 1.75 : -3.2), 0, 1);
+        const fall = 1 - (1 - fallProgress) ** 3;
         actors.hands.forEach((hand, index) => {
           const base = basePosition(hand);
-          hand.position.z = base.z + Math.sin(elapsed * 1.7 + index) * 0.045 + impact * 0.32;
-          hand.rotation.y = baseRotation(hand).y + Math.sin(elapsed * 0.8 + index) * 0.04;
+          hand.position.z = base.z + (reducedMotion ? 0 : Math.sin(elapsed * 1.7 + index) * 0.025) + impact * 0.32;
+          hand.rotation.y = baseRotation(hand).y + (reducedMotion ? 0 : Math.sin(elapsed * 0.8 + index) * 0.025);
         });
-        if (actors.officeHero) actors.officeHero.rotation.z = baseRotation(actors.officeHero).z + Math.sin(elapsed * 1.1) * 0.012 - impact * 0.045;
+        if (actors.officeHero) {
+          const position = basePosition(actors.officeHero);
+          const rotation = baseRotation(actors.officeHero);
+          actors.officeHero.position.x = position.x + fall * 0.42;
+          actors.officeHero.position.y = position.y - fall * 1.18;
+          actors.officeHero.position.z = position.z + fall * 0.22;
+          actors.officeHero.rotation.x = rotation.x + fall * 0.12;
+          actors.officeHero.rotation.z = rotation.z - fall * 1.34 - impact * 0.1 + (reducedMotion ? 0 : Math.sin(elapsed * 1.1) * 0.008);
+        }
       }
+      if (reducedMotion) return;
       if (variant === "scratch") animateScratch(elapsed, delta, live);
       if (variant === "reactor") {
         const power = Math.min(live.motion, 3);
@@ -413,9 +432,12 @@ export function MemeDiorama({
           actors.plane.position.y = base.y + Math.sin(elapsed * (1.5 + panic * 0.25)) * (0.012 + panic * 0.008);
           actors.plane.rotation.z = baseRotation(actors.plane).z + Math.sin(elapsed * 1.3) * (0.008 + panic * 0.008);
         }
+        if (actors.excavatorUpper) {
+          const base = baseRotation(actors.excavatorUpper);
+          actors.excavatorUpper.rotation.y = base.y + elapsed * (0.24 + panic * 0.16) + impact * 0.28;
+        }
         if (actors.excavatorArm) {
           const base = baseRotation(actors.excavatorArm);
-          actors.excavatorArm.rotation.y = base.y + elapsed * (0.24 + panic * 0.16) + impact * 0.28;
           actors.excavatorArm.rotation.z = base.z + Math.sin(elapsed * 1.05) * (0.018 + panic * 0.008);
         }
       }
@@ -437,11 +459,11 @@ export function MemeDiorama({
       impact *= 0.9;
       scratchVelocity *= 0.93;
       orbitRoot.rotation.set(
-        currentX + (reducedMotion ? 0 : Math.sin(elapsed * 0.62) * 0.01),
+        currentX + (reducedMotion || !orbitable ? 0 : Math.sin(elapsed * 0.62) * 0.01),
         currentY,
-        reducedMotion ? 0 : Math.sin(elapsed * 0.48) * 0.006 + impact * 0.018,
+        reducedMotion || !orbitable ? impact * 0.018 : Math.sin(elapsed * 0.48) * 0.006 + impact * 0.018,
       );
-      orbitRoot.position.y = reducedMotion ? 0 : Math.sin(elapsed * 0.78) * 0.018;
+      orbitRoot.position.y = reducedMotion || !orbitable ? 0 : Math.sin(elapsed * 0.78) * 0.018;
       animateActors(elapsed, delta);
       renderer.render(scene, camera);
     }
@@ -474,7 +496,7 @@ export function MemeDiorama({
       renderer.forceContextLoss();
       renderer.domElement.remove();
     };
-  }, [accent, hero, variant]);
+  }, [accent, hero, orbitable, variant]);
 
   const statusText = loadState.status === "ready"
     ? "BLENDER SCENE LIVE"
@@ -502,7 +524,7 @@ export function MemeDiorama({
         {loadState.status === "loading" ? <i style={{ "--load-progress": `${loadState.progress}%` } as React.CSSProperties} /> : null}
       </div>
       <span className="diorama-engine" aria-hidden="true">BLENDER → GLB → LIVE</span>
-      <span className="diorama-hint" aria-hidden="true">DRAG TO ORBIT · TAP TO ACTIVATE</span>
+      <span className="diorama-hint" aria-hidden="true">{orbitable ? "DRAG TO ORBIT · TAP TO ACTIVATE" : "CLICK TO FIRE · CAMERA LOCKED"}</span>
     </div>
   );
 }

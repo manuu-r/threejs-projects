@@ -43,6 +43,7 @@ test("server-renders the interactable memes experience", async () => {
   assert.match(html, /LOADING 3D CHARACTERS/);
   assert.match(html, /ORIGINAL MEME/);
   assert.match(html, /INTERACTIVE 3D REMAKE/);
+  assert.match(html, /CLICK TO FIRE · CAMERA LOCKED · RESET TO STAND HIM UP/);
   assert.match(html, /finger-guns\.png/);
   assert.match(html, /dj-cat\.png/);
   assert.match(html, /radioactive-dinosaur\.png/);
@@ -94,6 +95,8 @@ test("uses the production meshes and keeps the gorilla scene core-free", () => {
   assert.doesNotMatch(reactor, /ReactorCore|CoreCrystal|CoreRing/);
   assert.match(demo, /Fuselage_Cube/);
   assert.match(demo, /ExcavatorArm/);
+  assert.match(demo, /ExcavatorUpper/);
+  assert.match(demo, /PlaneRig/);
 });
 
 test("ships absolute social preview metadata", async () => {

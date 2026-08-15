@@ -97,8 +97,8 @@ export default function InteractableMemes() {
           <MemeReference src="/interactable-memes/source/finger-guns.png" alt="Original office finger-gun standoff meme" width={708} height={534} index="01" note="THE ORIGINAL FRAME / MAXIMUM CORPORATE TENSION" />
           <div className="machine machine-standoff">
             <div className="compare-label"><span>INTERACTIVE 3D REMAKE</span><span>01B / ARMED</span></div>
-            <MemeDiorama variant="crossfire" accent="#d8ff38" motion={shotCount} ariaLabel="3D finger-gun standoff. Drag to orbit and tap to fire." onAction={() => setShotCount((count) => count + 1)} />
-            <p className="machine-tip">DRAG TO ORBIT · TAP TO FIRE · 100% BLENDER-BUILT DIORAMA</p>
+            <MemeDiorama variant="crossfire" accent="#d8ff38" motion={shotCount} orbitable={false} ariaLabel="Static 3D finger-gun standoff. Click to fire and knock down the suited man." onAction={() => setShotCount((count) => count + 1)} />
+            <p className="machine-tip">CLICK TO FIRE · CAMERA LOCKED · RESET TO STAND HIM UP</p>
           </div>
         </div>
       </section>
