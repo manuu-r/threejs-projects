@@ -28,7 +28,10 @@ export default async function Home() {
     <main className="projects-index">
       <h1>tramapr.com</h1>
 
-      <p>projects:</p>
+      <p>
+        You have no business looking at this domain. But since you&apos;ve already
+        trespassed, here&apos;s the evidence:
+      </p>
 
       <ul>
         <li>
@@ -38,6 +41,17 @@ export default async function Home() {
           <a href="https://punch.tramapr.com">punch.tramapr.com</a>
         </li>
       </ul>
+
+      <p>
+        <a
+          className="follow-button"
+          href="https://x.com/manudotdev?ref_src=twsrc%5Etfw"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Follow @manudotdev on X
+        </a>
+      </p>
     </main>
   );
 }
