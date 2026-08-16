@@ -1,5 +1,43 @@
+import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-export default function Home() {
-  redirect("/interactable-memes");
+export const metadata: Metadata = {
+  title: { absolute: "tramapr.com" },
+  description: "Small browser experiments.",
+};
+
+export default async function Home() {
+  const requestHeaders = await headers();
+  const host = (requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "")
+    .split(",")[0]
+    .trim()
+    .split(":")[0]
+    .toLowerCase();
+  const subdomain = host.split(".")[0];
+
+  if (subdomain === "meme") {
+    redirect("/interactable-memes");
+  }
+
+  if (subdomain === "punch") {
+    redirect("/punch-power");
+  }
+
+  return (
+    <main className="projects-index">
+      <h1>tramapr.com</h1>
+
+      <p>projects:</p>
+
+      <ul>
+        <li>
+          <a href="https://meme.tramapr.com">meme.tramapr.com</a>
+        </li>
+        <li>
+          <a href="https://punch.tramapr.com">punch.tramapr.com</a>
+        </li>
+      </ul>
+    </main>
+  );
 }

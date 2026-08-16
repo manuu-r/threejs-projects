@@ -11,5 +11,41 @@ body {
 }
 
 body {
-  background: #080a0b;
+  background: white;
+  color: black;
+}
+
+.projects-index {
+  margin: 8px;
+  font-family: "Times New Roman", Times, serif;
+}
+
+.projects-index h1 {
+  margin-block: 0.67em;
+  font-size: 2em;
+  font-weight: bold;
+}
+
+.projects-index p {
+  margin-block: 1em;
+}
+
+.projects-index ul {
+  margin-block: 1em;
+  padding-left: 40px;
+  list-style: disc;
+}
+
+.projects-index a {
+  color: #0000ee;
+  text-decoration: underline;
+}
+
+.projects-index a:visited {
+  color: #551a8b;
+}
+
+.projects-index a:focus-visible {
+  outline: 1px dotted currentColor;
+  outline-offset: 2px;
 }
