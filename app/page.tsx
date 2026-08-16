@@ -49,8 +49,9 @@ export default async function Home() {
           target="_blank"
           rel="noreferrer"
         >
-          Follow @manudotdev on X
-        </a>
+          Follow on X
+        </a>{" "}
+        <small>(punishment for trespassing)</small>
       </p>
     </main>
   );
