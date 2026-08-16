@@ -24,6 +24,10 @@ export default async function Home() {
     redirect("/punch-power");
   }
 
+  if (subdomain === "lamp") {
+    redirect("/lamp");
+  }
+
   return (
     <main className="projects-index">
       <h1>tramapr.com</h1>
@@ -39,6 +43,9 @@ export default async function Home() {
         </li>
         <li>
           <a href="https://punch.tramapr.com">punch.tramapr.com</a>
+        </li>
+        <li>
+          <a href="https://lamp.tramapr.com">lamp.tramapr.com</a>
         </li>
       </ul>
 
