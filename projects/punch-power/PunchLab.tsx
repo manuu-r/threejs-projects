@@ -615,7 +615,7 @@ function curveMaskPatch(
   return geometry;
 }
 
-function createFaceMaskRenderer(canvas: HTMLCanvasElement) {
+export function createFaceMaskRenderer(canvas: HTMLCanvasElement) {
   const renderer = new THREE.WebGLRenderer({
     canvas,
     alpha: true,

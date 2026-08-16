@@ -240,6 +240,14 @@ export function isFingerNearLips(hand: Landmark[], face: Landmark[]): boolean {
 
 export type IkSolution = { shoulder: number; elbow: number };
 
+export type CameraTrackingTarget = {
+  baseYaw: number;
+  shoulder: number;
+  elbow: number;
+  headPitch: number;
+  headYaw: number;
+};
+
 export function solveTwoBoneIK(
   vertical: number,
   forward: number,
@@ -260,6 +268,44 @@ export function solveTwoBoneIK(
   return {
     shoulder: targetAngle - shoulderOffset,
     elbow: Math.PI - innerElbow,
+  };
+}
+
+const degrees = (value: number) => value * (Math.PI / 180);
+const clamp = (value: number, minimum: number, maximum: number) =>
+  Math.min(maximum, Math.max(minimum, value));
+
+/**
+ * Maps raw MediaPipe coordinates into the mirrored selfie view used by the UI.
+ * The IK target is calibrated around Luma's authored rest pose, so looking at a
+ * centered person keeps the weighted base upright instead of solving toward an
+ * unrelated full-extension target.
+ */
+export function mapCameraTrackingTarget(
+  palm: Landmark,
+  direction?: Landmark,
+): CameraTrackingTarget {
+  const mirroredX = 1 - palm.x;
+  const lateral = clamp((mirroredX - 0.5) * 2, -1, 1);
+  const verticalScreen = clamp((0.5 - palm.y) * 2, -1, 1);
+  const depth = clamp(-palm.z * 4, -0.7, 0.7);
+
+  const rest = solveTwoBoneIK(0.637, 0.105);
+  const target = solveTwoBoneIK(
+    0.637 + verticalScreen * 0.075 - depth * 0.03,
+    0.105 + depth * 0.11 + Math.abs(lateral) * 0.025,
+  );
+
+  const mirroredPointX = direction ? -direction.x : 0;
+  // MediaPipe's Y axis increases downward. Luma's positive head pitch also
+  // looks downward, so the raw pointing direction already has the right sign.
+  const pointY = direction ? direction.y : 0;
+  return {
+    baseYaw: clamp(lateral * degrees(28), -degrees(32), degrees(32)),
+    shoulder: clamp(target.shoulder - rest.shoulder, -degrees(18), degrees(22)),
+    elbow: clamp(target.elbow - rest.elbow, -degrees(26), degrees(24)),
+    headPitch: clamp(verticalScreen * degrees(18) + pointY * degrees(13), -degrees(38), degrees(38)),
+    headYaw: clamp(lateral * degrees(24) + mirroredPointX * degrees(14), -degrees(42), degrees(42)),
   };
 }
 

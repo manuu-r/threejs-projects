@@ -4,6 +4,7 @@ import {
   DEFAULT_MAPPINGS,
   GestureStateMachine,
   WaveDetector,
+  mapCameraTrackingTarget,
   solveTwoBoneIK,
 } from "../projects/lamp/gestureEngine.ts";
 
@@ -59,4 +60,45 @@ test("two-bone IK stays finite for unreachable targets", () => {
     assert.ok(Number.isFinite(solution.elbow));
     assert.ok(solution.elbow >= 0 && solution.elbow <= Math.PI);
   }
+});
+
+test("camera mapping mirrors lateral motion and preserves an upright arm envelope", () => {
+  const centered = mapCameraTrackingTarget({ x: 0.5, y: 0.5, z: -0.1 });
+  const cameraLeft = mapCameraTrackingTarget({ x: 0.2, y: 0.5, z: -0.2 });
+  const cameraRight = mapCameraTrackingTarget({ x: 0.8, y: 0.5, z: -0.2 });
+
+  assert.ok(Math.abs(centered.shoulder) < Math.PI / 12);
+  assert.ok(Math.abs(centered.elbow) < Math.PI / 12);
+  assert.ok(cameraLeft.baseYaw > 0);
+  assert.ok(cameraRight.baseYaw < 0);
+  assert.ok(Math.abs(cameraLeft.baseYaw + cameraRight.baseYaw) < 1e-9);
+  assert.ok(Math.abs(cameraLeft.shoulder) <= 22 * Math.PI / 180);
+  assert.ok(Math.abs(cameraLeft.elbow) <= 26 * Math.PI / 180);
+});
+
+test("point direction is mirrored into the lamp's camera-facing head turn", () => {
+  const rightwardInRawCamera = mapCameraTrackingTarget(
+    { x: 0.5, y: 0.5, z: -0.1 },
+    { x: 1, y: 0, z: 0 },
+  );
+  const leftwardInRawCamera = mapCameraTrackingTarget(
+    { x: 0.5, y: 0.5, z: -0.1 },
+    { x: -1, y: 0, z: 0 },
+  );
+  assert.ok(rightwardInRawCamera.headYaw < 0);
+  assert.ok(leftwardInRawCamera.headYaw > 0);
+});
+
+test("pointing up looks up and pointing down looks down", () => {
+  const pointingUp = mapCameraTrackingTarget(
+    { x: 0.5, y: 0.5, z: -0.1 },
+    { x: 0, y: -1, z: 0 },
+  );
+  const pointingDown = mapCameraTrackingTarget(
+    { x: 0.5, y: 0.5, z: -0.1 },
+    { x: 0, y: 1, z: 0 },
+  );
+
+  assert.ok(pointingUp.headPitch < 0);
+  assert.ok(pointingDown.headPitch > 0);
 });

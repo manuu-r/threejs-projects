@@ -4,11 +4,15 @@ Luma is a browser-based control and behavior prototype for an expressive articul
 
 ## Runtime architecture
 
-- `LampLab.tsx` owns the Three.js scene, local MediaPipe hand/face tracking, procedural animation, local audio analysis, voice/clap input, recording, and the UI.
+- `LampLab.tsx` owns the Three.js scene, local MediaPipe hand/face tracking, procedural animation, local audio analysis, voice/clap input, recording, and the UI. Its camera view reuses Punch Power's exact sculpted Three.js face-mask renderer.
 - `gestureEngine.ts` contains pure gesture classification, wave detection, two-bone IK, joint limits, and the debounced behavior state machine.
 - `behaviorPack.ts` creates a dependency-free ZIP containing mappings, animation names, light settings, safety parameters, the GLB, and a physical-controller configuration foundation.
-- `public/lamp/luma-character-lamp.glb` is the web model. Named transform nodes are `LampRoot`, `BaseYaw`, `Shoulder`, `Elbow`, `HeadPitch`, and `HeadYaw`.
-- `art/lamp/luma-character-lamp.blend` is the editable source. The exact user-adjusted visual placement is backed up at `art/lamp/luma-character-lamp.user-placement.blend`.
+- `public/lamp/luma-character-lamp.glb` is the web model. Named transform nodes include `LampRoot`, `BaseYaw`, `Shoulder`, `Elbow`, `HeadPitch`, `HeadYaw`, `DriveWheelLeft`, `DriveWheelRight`, and `CasterWheel`. The three wheels roll with Luma's persistent, damped forward/back movement.
+- `art/lamp/luma-character-lamp.blend` is the editable source. The latest exact user-adjusted visual placement is backed up at `art/lamp/luma-character-lamp.user-placement-v2.blend`.
+- Eye blinks drive both eye and pupil meshes through the same eased squash and opacity fade, so no pupil remains visible after the eyelids close.
+- The lamp stays visibly on through a head-tracked warm spotlight, bulb halo, and floor spill; sleep reduces these effects without switching them off. The light is intentionally atmospheric without a visible projection cone.
+- The head-pitch axis is seated in a dedicated steel neck axle with brass retaining collars, keeping the head visually connected through its full pitch movement.
+- Eyebrow expressions are additive to the rotations authored in Blender, so idle and animated poses retain the exact imported eyebrow alignment.
 
 ## Gesture safety
 

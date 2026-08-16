@@ -219,6 +219,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 1px s
 .lamp-camera-view video, .lamp-camera-view canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
 .lamp-camera-view video { opacity: 0.72; filter: saturate(0.7) contrast(1.15) brightness(0.78); }
 .lamp-camera-view canvas { z-index: 2; pointer-events: none; }
+.lamp-camera-view .lamp-face-mask-layer { z-index: 1; }
+.lamp-camera-view .lamp-hand-landmark-layer { z-index: 2; }
 .lamp-camera-empty { position: absolute; inset: 0; display: grid; place-content: center; gap: 3px; color: rgba(255, 244, 223, 0.3); font: 800 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.2em; text-align: center; }
 .lamp-camera-empty small { color: var(--lamp-amber); font-size: 6px; }
 .frame { position: absolute; z-index: 3; width: 13px; height: 13px; border-color: var(--lamp-cyan); opacity: 0.72; }

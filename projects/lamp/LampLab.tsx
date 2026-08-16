@@ -10,6 +10,7 @@ import {
 } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type {
   FaceLandmarker,
   FaceLandmarkerResult,
@@ -21,11 +22,10 @@ import {
   DEFAULT_MAPPINGS,
   GESTURE_LABELS,
   GestureStateMachine,
-  JOINT_LIMITS,
   WaveDetector,
   classifyHandGesture,
   isFingerNearLips,
-  solveTwoBoneIK,
+  mapCameraTrackingTarget,
   type BehaviorState,
   type GestureMappings,
   type GestureName,
@@ -38,6 +38,7 @@ import {
   downloadSessionReplay,
   type SessionEvent,
 } from "./behaviorPack";
+import { createFaceMaskRenderer } from "../punch-power/PunchLab";
 
 type Phase = "idle" | "loading" | "active" | "error";
 
@@ -119,7 +120,7 @@ function createLampScene(
 ): LampSceneApi {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x061017);
-  scene.fog = new THREE.FogExp2(0x061017, 0.64);
+  scene.fog = new THREE.FogExp2(0x061017, 0.24);
 
   const camera = new THREE.PerspectiveCamera(34, 1, 0.01, 30);
   camera.position.set(-1.42, 1.02, 2.3);
@@ -134,12 +135,18 @@ function createLampScene(
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.06;
+  renderer.toneMappingExposure = 1.42;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
+  const pmremGenerator = new THREE.PMREMGenerator(renderer);
+  const environmentRenderTarget = pmremGenerator.fromScene(new RoomEnvironment(), 0.04);
+  scene.environment = environmentRenderTarget.texture;
+  scene.environmentIntensity = 1.25;
+  pmremGenerator.dispose();
 
-  scene.add(new THREE.HemisphereLight(0xbcefff, 0x03080b, 1.6));
-  const key = new THREE.DirectionalLight(0xffbd75, 4.8);
+  scene.add(new THREE.HemisphereLight(0xd9f8ff, 0x142027, 3.5));
+  scene.add(new THREE.AmbientLight(0xaed3df, 1.9));
+  const key = new THREE.DirectionalLight(0xffbd75, 6.4);
   key.position.set(2.5, 3.2, 2.2);
   key.castShadow = true;
   key.shadow.mapSize.set(1024, 1024);
@@ -147,6 +154,12 @@ function createLampScene(
   const rim = new THREE.PointLight(0x45dfff, 23, 6, 1.8);
   rim.position.set(-1.35, 1.3, -1.35);
   scene.add(rim);
+  const frontFill = new THREE.DirectionalLight(0xe8fbff, 8.2);
+  frontFill.position.set(-1.5, 1.7, 3.8);
+  scene.add(frontFill);
+  const faceFill = new THREE.PointLight(0xffe7c2, 19, 5.5, 1.45);
+  faceFill.position.set(-0.9, 1.25, 2.15);
+  scene.add(faceFill);
 
   const floor = new THREE.Mesh(
     new THREE.CircleGeometry(4.2, 128),
@@ -161,6 +174,62 @@ function createLampScene(
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   scene.add(floor);
+
+  const lampSpotTarget = new THREE.Object3D();
+  scene.add(lampSpotTarget);
+  const lampSpot = new THREE.SpotLight(0xffa24a, 180, 7, radians(31), 0.72, 1.25);
+  lampSpot.castShadow = true;
+  lampSpot.shadow.mapSize.set(1024, 1024);
+  lampSpot.shadow.bias = -0.00015;
+  lampSpot.target = lampSpotTarget;
+  lampSpot.visible = false;
+  scene.add(lampSpot);
+
+  const floorGlowMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffa24a,
+    transparent: true,
+    opacity: 0.34,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  const floorGlow = new THREE.Mesh(new THREE.CircleGeometry(0.62, 64), floorGlowMaterial);
+  floorGlow.rotation.x = -Math.PI / 2;
+  floorGlow.position.y = 0.008;
+  floorGlow.frustumCulled = false;
+  floorGlow.visible = false;
+  scene.add(floorGlow);
+
+  const glowCanvas = document.createElement("canvas");
+  glowCanvas.width = 128;
+  glowCanvas.height = 128;
+  const glowContext = glowCanvas.getContext("2d");
+  if (glowContext) {
+    const gradient = glowContext.createRadialGradient(64, 64, 3, 64, 64, 63);
+    gradient.addColorStop(0, "rgba(255,255,238,1)");
+    gradient.addColorStop(0.2, "rgba(255,189,92,0.9)");
+    gradient.addColorStop(0.58, "rgba(255,144,48,0.22)");
+    gradient.addColorStop(1, "rgba(255,128,32,0)");
+    glowContext.fillStyle = gradient;
+    glowContext.fillRect(0, 0, 128, 128);
+  }
+  const bulbGlowTexture = new THREE.CanvasTexture(glowCanvas);
+  bulbGlowTexture.colorSpace = THREE.SRGBColorSpace;
+  const bulbGlowMaterial = new THREE.SpriteMaterial({
+    map: bulbGlowTexture,
+    color: 0xffb15a,
+    transparent: true,
+    opacity: 0.58,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,
+    toneMapped: false,
+  });
+  const bulbGlow = new THREE.Sprite(bulbGlowMaterial);
+  bulbGlow.scale.set(0.48, 0.48, 1);
+  bulbGlow.frustumCulled = false;
+  bulbGlow.visible = false;
+  scene.add(bulbGlow);
 
   const rings = new THREE.Group();
   for (const radius of [0.53, 0.88, 1.3, 1.82]) {
@@ -197,27 +266,61 @@ function createLampScene(
   let headYaw: THREE.Object3D | null = null;
   let eyeLeft: THREE.Object3D | null = null;
   let eyeRight: THREE.Object3D | null = null;
+  let pupilLeft: THREE.Object3D | null = null;
+  let pupilRight: THREE.Object3D | null = null;
   let browLeft: THREE.Object3D | null = null;
   let browRight: THREE.Object3D | null = null;
   let bulb: THREE.Mesh | null = null;
+  let driveWheelLeft: THREE.Object3D | null = null;
+  let driveWheelRight: THREE.Object3D | null = null;
+  let casterWheel: THREE.Object3D | null = null;
+  let driveWheelLeftRestX = 0;
+  let driveWheelRightRestX = 0;
+  let casterWheelRestX = 0;
   let eyeLeftScale = new THREE.Vector3(1, 1, 1);
   let eyeRightScale = new THREE.Vector3(1, 1, 1);
+  let pupilLeftScale = new THREE.Vector3(1, 1, 1);
+  let pupilRightScale = new THREE.Vector3(1, 1, 1);
+  let browLeftRestZ = 0;
+  let browRightRestZ = 0;
+  let eyeFade = 1;
+  const blinkMaterials: Array<{ material: THREE.Material; opacity: number }> = [];
+  let lampFloorY = 0.003;
 
-  const lampLight = new THREE.PointLight(0xff8a35, 18, 3.2, 1.7);
+  const lampLight = new THREE.PointLight(0xff8a35, 36, 4.2, 1.45);
   scene.add(lampLight);
   const bulbWorld = new THREE.Vector3();
+  const headWorldQuaternion = new THREE.Quaternion();
+  const headForward = new THREE.Vector3();
+  const beamDirection = new THREE.Vector3();
+  const beamOrigin = new THREE.Vector3();
+  const beamTargetPoint = new THREE.Vector3();
 
   new GLTFLoader().load(
     "/lamp/luma-character-lamp.glb",
     (gltf) => {
       lamp = gltf.scene;
       lamp.scale.setScalar(1.43);
-      lamp.position.set(0.22, 0.003, 0);
+      lamp.position.set(0.22, 0, 0);
       lamp.traverse((object) => {
         if (object instanceof THREE.Mesh) {
           object.castShadow = true;
           object.receiveShadow = true;
           object.frustumCulled = false;
+          const materials = Array.isArray(object.material) ? object.material : [object.material];
+          for (const material of materials) {
+            if (!(material instanceof THREE.MeshStandardMaterial)) continue;
+            material.envMapIntensity = 3.1;
+            if (material.name === "Lamp Graphite") {
+              material.color.multiplyScalar(1.9);
+              material.emissive.set(0x162a31);
+              material.emissiveIntensity = 0.72;
+            } else if (material.name === "Lamp Spring Steel") {
+              material.color.multiplyScalar(1.3);
+              material.emissive.set(0x091216);
+              material.emissiveIntensity = 0.38;
+            }
+          }
         }
       });
       baseYaw = lamp.getObjectByName("BaseYaw") ?? null;
@@ -227,11 +330,50 @@ function createLampScene(
       headYaw = lamp.getObjectByName("HeadYaw") ?? null;
       eyeLeft = lamp.getObjectByName("EyeLeft") ?? null;
       eyeRight = lamp.getObjectByName("EyeRight") ?? null;
+      pupilLeft = lamp.getObjectByName("PupilLeft") ?? null;
+      pupilRight = lamp.getObjectByName("PupilRight") ?? null;
       browLeft = lamp.getObjectByName("BrowLeft") ?? null;
       browRight = lamp.getObjectByName("BrowRight") ?? null;
       bulb = (lamp.getObjectByName("LampBulb") as THREE.Mesh | undefined) ?? null;
+      driveWheelLeft = lamp.getObjectByName("DriveWheelLeft") ?? null;
+      driveWheelRight = lamp.getObjectByName("DriveWheelRight") ?? null;
+      casterWheel = lamp.getObjectByName("CasterWheel") ?? null;
+      driveWheelLeftRestX = driveWheelLeft?.rotation.x ?? 0;
+      driveWheelRightRestX = driveWheelRight?.rotation.x ?? 0;
+      casterWheelRestX = casterWheel?.rotation.x ?? 0;
       eyeLeftScale = eyeLeft?.scale.clone() ?? eyeLeftScale;
       eyeRightScale = eyeRight?.scale.clone() ?? eyeRightScale;
+      pupilLeftScale = pupilLeft?.scale.clone() ?? pupilLeftScale;
+      pupilRightScale = pupilRight?.scale.clone() ?? pupilRightScale;
+      browLeftRestZ = browLeft?.rotation.z ?? browLeftRestZ;
+      browRightRestZ = browRight?.rotation.z ?? browRightRestZ;
+      for (const [part, luminous] of [
+        [eyeLeft, true],
+        [eyeRight, true],
+        [pupilLeft, false],
+        [pupilRight, false],
+      ] as const) {
+        part?.traverse((object) => {
+          if (!(object instanceof THREE.Mesh)) return;
+          const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material];
+          const blinkableMaterials = sourceMaterials.map((sourceMaterial) => {
+            const material = sourceMaterial.clone();
+            material.transparent = true;
+            material.depthWrite = false;
+            blinkMaterials.push({ material, opacity: material.opacity });
+            if (luminous && material instanceof THREE.MeshStandardMaterial) {
+              material.emissive.set(0xfff4df);
+              material.emissiveIntensity = 1.35;
+              material.toneMapped = false;
+            }
+            return material;
+          });
+          object.material = Array.isArray(object.material) ? blinkableMaterials : blinkableMaterials[0];
+        });
+      }
+      const bounds = new THREE.Box3().setFromObject(lamp);
+      lampFloorY = 0.003 - bounds.min.y;
+      lamp.position.y = lampFloorY;
       scene.add(lamp);
       onReady();
     },
@@ -248,6 +390,9 @@ function createLampScene(
   let sleeping = false;
   let muted = false;
   let beat = 0;
+  let travelTargetZ = 0;
+  let previousRootZ = 0;
+  let wheelAngle = 0;
   let settings: LampSettings = {
     reactionSpeed: 1,
     smoothness: 0.7,
@@ -298,6 +443,9 @@ function createLampScene(
     } else if (action === "closer" || action === "back") {
       paused = false;
       sleeping = false;
+      locked = false;
+      const travelStep = action === "closer" ? 0.22 : -0.22;
+      travelTargetZ = clamp(travelTargetZ + travelStep, -0.5, 0.5);
     }
   };
 
@@ -336,35 +484,15 @@ function createLampScene(
     }
 
     if (!paused && !locked && !sleeping && trackingMode && observation?.palm) {
-      const palm = observation.palm;
-      const vertical = clamp((1 - palm.y) * 0.76, 0.22, 0.78);
-      const forward = clamp(0.2 - palm.z * 1.2, 0.1, 0.62);
-      const solution = solveTwoBoneIK(vertical, forward);
-      const targetAngle = Math.atan2(forward, vertical);
-      const desiredShoulder = targetAngle * 2 - solution.shoulder;
-      const shoulderRest = radians(36);
-      const elbowRest = radians(85);
-      targets.baseYaw = clamp(
-        (0.5 - palm.x) * 1.7,
-        radians(JOINT_LIMITS.baseYaw[0]),
-        radians(JOINT_LIMITS.baseYaw[1]),
+      const cameraTarget = mapCameraTrackingTarget(
+        observation.palm,
+        trackingMode === "point" ? observation.direction : undefined,
       );
-      targets.shoulder = clamp(
-        desiredShoulder - shoulderRest,
-        radians(JOINT_LIMITS.shoulderPitch[0] - 36),
-        radians(JOINT_LIMITS.shoulderPitch[1] - 36),
-      );
-      targets.elbow = clamp(
-        solution.elbow - elbowRest,
-        radians(JOINT_LIMITS.elbowPitch[0] - 85),
-        radians(JOINT_LIMITS.elbowPitch[1] - 85),
-      );
-      targets.headPitch = clamp((0.48 - palm.y) * 0.8, -radians(45), radians(45));
-      targets.headYaw = clamp((0.5 - palm.x) * 0.72, -radians(55), radians(55));
-      if (trackingMode === "point" && observation.direction) {
-        targets.headPitch += clamp(-observation.direction.y * 0.36, -0.28, 0.28);
-        targets.headYaw += clamp(-observation.direction.x * 0.34, -0.3, 0.3);
-      }
+      targets.baseYaw = cameraTarget.baseYaw;
+      targets.shoulder = cameraTarget.shoulder;
+      targets.elbow = cameraTarget.elbow;
+      targets.headPitch = cameraTarget.headPitch;
+      targets.headYaw = cameraTarget.headYaw;
     }
 
     if (locked) Object.assign(targets, lockedPose);
@@ -373,14 +501,8 @@ function createLampScene(
       targets.elbow = radians(-34);
       targets.headPitch = radians(34);
       targets.headRoll = radians(-8);
-      targets.rootZ = -0.05;
-    } else if (currentAction === "closer") {
-      targets.rootZ = 0.24 * Math.min(1, actionTime / 0.8);
-    } else if (currentAction === "back") {
-      targets.rootZ = -0.2 * Math.min(1, actionTime / 0.8);
-    } else {
-      targets.rootZ = 0;
     }
+    targets.rootZ = travelTargetZ;
 
     if (currentAction === "confirm" && actionTime < 0.9) {
       targets.headPitch += Math.sin(actionTime * Math.PI * 4) * 0.16;
@@ -388,15 +510,15 @@ function createLampScene(
     if (currentAction === "friendly" && actionTime < 1.8) {
       targets.baseYaw += Math.sin(actionTime * Math.PI * 2.3) * 0.2;
       targets.headRoll += Math.sin(actionTime * Math.PI * 3.4) * 0.16;
-      if (lamp) lamp.position.y = Math.abs(Math.sin(actionTime * Math.PI * 2.4)) * 0.055;
+      if (lamp) lamp.position.y = lampFloorY + Math.abs(Math.sin(actionTime * Math.PI * 2.4)) * 0.055;
     } else if (currentAction === "wave_back" && actionTime < 1.5) {
       targets.baseYaw += Math.sin(actionTime * Math.PI * 5) * 0.24;
       targets.headRoll += Math.sin(actionTime * Math.PI * 5 + 0.8) * 0.12;
     } else if (currentAction === "wake" && actionTime < 1.8) {
       targets.headPitch += Math.sin(actionTime * Math.PI * 4) * 0.13 * (1 - actionTime / 1.8);
-      if (lamp) lamp.position.y = Math.abs(Math.sin(actionTime * Math.PI * 2.4)) * 0.07;
+      if (lamp) lamp.position.y = lampFloorY + Math.abs(Math.sin(actionTime * Math.PI * 2.4)) * 0.07;
     } else if (lamp) {
-      lamp.position.y = THREE.MathUtils.damp(lamp.position.y, 0.003, 6, dt);
+      lamp.position.y = THREE.MathUtils.damp(lamp.position.y, lampFloorY, 6, dt);
     }
     if (currentAction === "mute" && actionTime < 1.2) {
       targets.headPitch += 0.24;
@@ -414,7 +536,8 @@ function createLampScene(
     pose.headPitch = THREE.MathUtils.damp(pose.headPitch, targets.headPitch, damping + 1, dt);
     pose.headYaw = THREE.MathUtils.damp(pose.headYaw, targets.headYaw, damping + 1, dt);
     pose.headRoll = THREE.MathUtils.damp(pose.headRoll, targets.headRoll, damping + 1, dt);
-    pose.rootZ = THREE.MathUtils.damp(pose.rootZ, targets.rootZ, damping, dt);
+    const travelDamping = 3.2 + (1 - settings.smoothness) * 2.8;
+    pose.rootZ = THREE.MathUtils.damp(pose.rootZ, targets.rootZ, travelDamping, dt);
 
     if (baseYaw) baseYaw.rotation.y = pose.baseYaw;
     if (shoulder) shoulder.rotation.x = pose.shoulder;
@@ -425,40 +548,103 @@ function createLampScene(
       headYaw.rotation.z = pose.headRoll;
     }
     if (lamp) lamp.position.z = pose.rootZ;
+    const travelDelta = pose.rootZ - previousRootZ;
+    wheelAngle += travelDelta / 0.074;
+    previousRootZ = pose.rootZ;
+    if (driveWheelLeft) driveWheelLeft.rotation.x = driveWheelLeftRestX + wheelAngle;
+    if (driveWheelRight) driveWheelRight.rotation.x = driveWheelRightRestX + wheelAngle;
+    if (casterWheel) casterWheel.rotation.x = casterWheelRestX + wheelAngle * 0.82;
 
     if (elapsed >= nextBlink) {
       blinkUntil = elapsed + 0.13;
       nextBlink = elapsed + 2.7 + Math.random() * 3.1;
     }
-    const forcedBlink =
-      (currentAction === "friendly" && actionTime < 0.42 && Math.sin(actionTime * 28) > 0.1) ||
-      sleeping;
-    const blink = elapsed < blinkUntil || forcedBlink ? 0.08 : 1;
-    if (eyeLeft) eyeLeft.scale.y = THREE.MathUtils.damp(eyeLeft.scale.y, eyeLeftScale.y * blink, 24, dt);
-    if (eyeRight) eyeRight.scale.y = THREE.MathUtils.damp(eyeRight.scale.y, eyeRightScale.y * blink, 24, dt);
+    const gestureBlink = currentAction !== null && (
+      (actionTime >= 0.06 && actionTime < 0.17) ||
+      (actionTime >= 0.27 && actionTime < 0.38)
+    );
+    const forcedBlink = gestureBlink || (sleeping && actionTime >= 0.44);
+    const blinkTarget = elapsed < blinkUntil || forcedBlink ? 0 : 1;
+    eyeFade = THREE.MathUtils.damp(eyeFade, blinkTarget, 32, dt);
+    const eyeSquash = 0.04 + eyeFade * 0.96;
+    const pupilScale = 0.06 + eyeFade * 0.94;
+    if (eyeLeft) eyeLeft.scale.y = eyeLeftScale.y * eyeSquash;
+    if (eyeRight) eyeRight.scale.y = eyeRightScale.y * eyeSquash;
+    if (pupilLeft) pupilLeft.scale.copy(pupilLeftScale).multiplyScalar(pupilScale);
+    if (pupilRight) pupilRight.scale.copy(pupilRightScale).multiplyScalar(pupilScale);
+    for (const entry of blinkMaterials) entry.material.opacity = entry.opacity * eyeFade;
     if (browLeft && browRight) {
       const curious = currentAction === "friendly" && actionTime < 1.8 ? 0.16 : 0;
-      browLeft.rotation.z = THREE.MathUtils.damp(browLeft.rotation.z, curious, 10, dt);
-      browRight.rotation.z = THREE.MathUtils.damp(browRight.rotation.z, -curious, 10, dt);
+      browLeft.rotation.z = THREE.MathUtils.damp(
+        browLeft.rotation.z,
+        browLeftRestZ + curious,
+        10,
+        dt,
+      );
+      browRight.rotation.z = THREE.MathUtils.damp(
+        browRight.rotation.z,
+        browRightRestZ - curious,
+        10,
+        dt,
+      );
     }
 
     const lightColor = new THREE.Color(settings.lightColor);
-    const quietFactor = muted ? 0.44 : 1;
-    const sleepFactor = sleeping ? 0.06 : 1;
-    const pulse = 1 + beat * 0.85;
+    const visibleBrightness = 0.5 + settings.brightness * 0.5;
+    const sleepFactor = sleeping ? 0.72 : 1;
+    const reactiveBeat = muted ? 0 : beat;
+    const pulse = 1 + reactiveBeat * 0.85;
     lampLight.color.lerp(lightColor, 0.18);
     lampLight.intensity = THREE.MathUtils.damp(
       lampLight.intensity,
-      23 * settings.brightness * quietFactor * sleepFactor * pulse,
+      44 * visibleBrightness * sleepFactor * pulse,
       8,
       dt,
     );
-    if (bulb) {
+    lampSpot.color.lerp(lightColor, 0.18);
+    lampSpot.intensity = THREE.MathUtils.damp(
+      lampSpot.intensity,
+      210 * visibleBrightness * sleepFactor * pulse,
+      8,
+      dt,
+    );
+    floorGlowMaterial.color.lerp(lightColor, 0.18);
+    bulbGlowMaterial.color.lerp(lightColor, 0.18);
+    floorGlowMaterial.opacity = THREE.MathUtils.damp(
+      floorGlowMaterial.opacity,
+      0.42 * visibleBrightness * sleepFactor,
+      8,
+      dt,
+    );
+    bulbGlowMaterial.opacity = THREE.MathUtils.damp(
+      bulbGlowMaterial.opacity,
+      0.72 * visibleBrightness * sleepFactor * pulse,
+      8,
+      dt,
+    );
+    if (bulb && headYaw) {
+      lampSpot.visible = true;
+      floorGlow.visible = true;
+      bulbGlow.visible = true;
       bulb.getWorldPosition(bulbWorld);
       lampLight.position.copy(bulbWorld);
+      headYaw.getWorldQuaternion(headWorldQuaternion);
+      headForward.set(0, 0, 1).applyQuaternion(headWorldQuaternion).normalize();
+      beamDirection.copy(headForward);
+      beamDirection.y = Math.min(beamDirection.y - 0.58, -0.24);
+      beamDirection.normalize();
+      beamOrigin.copy(bulbWorld).addScaledVector(headForward, 0.085);
+      const floorDistance = clamp((0.012 - beamOrigin.y) / beamDirection.y, 0.72, 4.3);
+      beamTargetPoint.copy(beamOrigin).addScaledVector(beamDirection, floorDistance);
+      lampSpot.position.copy(beamOrigin);
+      lampSpotTarget.position.copy(beamTargetPoint);
+      floorGlow.position.set(beamTargetPoint.x, 0.008, beamTargetPoint.z);
+      const poolScale = 0.85 + floorDistance * 0.1;
+      floorGlow.scale.set(poolScale, poolScale, poolScale);
+      bulbGlow.position.copy(beamOrigin);
       const material = bulb.material as THREE.MeshStandardMaterial;
       if (material.emissive) material.emissive.copy(lightColor);
-      material.emissiveIntensity = 1.6 + settings.brightness * 3 * quietFactor * sleepFactor * pulse;
+      material.emissiveIntensity = 4.2 + visibleBrightness * 5.2 * sleepFactor * pulse;
     }
     beat *= Math.pow(0.05, dt);
     dust.rotation.y += dt * 0.012;
@@ -487,6 +673,9 @@ function createLampScene(
     dispose() {
       cancelAnimationFrame(frame);
       resizeObserver.disconnect();
+      bulbGlowTexture.dispose();
+      bulbGlowMaterial.dispose();
+      environmentRenderTarget.dispose();
       renderer.dispose();
       scene.traverse((object) => {
         if (object instanceof THREE.Mesh || object instanceof THREE.Points) {
@@ -502,6 +691,7 @@ function createLampScene(
 export default function LampLab() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const faceMaskCanvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -510,6 +700,7 @@ export default function LampLab() {
   const sceneRef = useRef<LampSceneApi | null>(null);
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
   const faceLandmarkerRef = useRef<FaceLandmarker | null>(null);
+  const faceMaskRendererRef = useRef<ReturnType<typeof createFaceMaskRenderer> | null>(null);
   const latestFaceRef = useRef<FaceLandmarkerResult | null>(null);
   const trackingFrameRef = useRef(0);
   const previousVideoTimeRef = useRef(-1);
@@ -593,6 +784,16 @@ export default function LampLab() {
     };
   }, []);
 
+  useEffect(() => {
+    const canvas = faceMaskCanvasRef.current;
+    if (!canvas) return;
+    faceMaskRendererRef.current = createFaceMaskRenderer(canvas);
+    return () => {
+      faceMaskRendererRef.current?.dispose();
+      faceMaskRendererRef.current = null;
+    };
+  }, []);
+
   const ensureAudioContext = useCallback(() => {
     if (!audioContextRef.current) audioContextRef.current = new AudioContext();
     void audioContextRef.current.resume();
@@ -662,6 +863,7 @@ export default function LampLab() {
       canvas.width = width;
       canvas.height = height;
     }
+    faceMaskRendererRef.current?.update(face, width, height);
     const context = canvas.getContext("2d");
     if (!context) return;
     context.clearRect(0, 0, width, height);
@@ -685,25 +887,6 @@ export default function LampLab() {
         context.fill();
       });
     });
-    const faceLandmarks = face?.faceLandmarks[0];
-    if (faceLandmarks?.[13] && faceLandmarks[14]) {
-      const upper = faceLandmarks[13];
-      const lower = faceLandmarks[14];
-      context.shadowBlur = 7;
-      context.strokeStyle = "#ffad4a";
-      context.lineWidth = 2;
-      context.beginPath();
-      context.ellipse(
-        ((upper.x + lower.x) / 2) * width,
-        ((upper.y + lower.y) / 2) * height,
-        width * 0.019,
-        Math.max(3, Math.abs(upper.y - lower.y) * height * 1.7),
-        0,
-        0,
-        Math.PI * 2,
-      );
-      context.stroke();
-    }
     if (observation?.direction && hands.landmarks[0]?.[8]) {
       const tip = hands.landmarks[0][8];
       context.strokeStyle = "#fff4df";
@@ -848,8 +1031,8 @@ export default function LampLab() {
       minFaceDetectionConfidence: 0.54,
       minFacePresenceConfidence: 0.52,
       minTrackingConfidence: 0.52,
-      outputFaceBlendshapes: false,
-      outputFacialTransformationMatrixes: false,
+      outputFaceBlendshapes: true,
+      outputFacialTransformationMatrixes: true,
     });
     try {
       handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, handOptions("GPU"));
@@ -913,6 +1096,11 @@ export default function LampLab() {
     sceneRef.current?.updateObservation(null);
     const overlay = overlayRef.current?.getContext("2d");
     if (overlayRef.current && overlay) overlay.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height);
+    faceMaskRendererRef.current?.update(
+      null,
+      videoRef.current?.videoWidth || 640,
+      videoRef.current?.videoHeight || 360,
+    );
     setCameraLive(false);
     setHandsDetected(0);
     setBehaviorState("Idle");
@@ -1120,7 +1308,9 @@ export default function LampLab() {
     audioRef.current?.pause();
     const audioContext = audioContextRef.current;
     audioContextRef.current = null;
-    if (audioContext?.state !== "closed") void audioContext.close().catch(() => undefined);
+    if (audioContext && audioContext.state !== "closed") {
+      void audioContext.close().catch(() => undefined);
+    }
     if (musicUrlRef.current) URL.revokeObjectURL(musicUrlRef.current);
   }, [stopCamera, stopVoice]);
 
@@ -1242,14 +1432,23 @@ export default function LampLab() {
 
       <aside className={`lamp-camera ${cameraExpanded ? "expanded" : "collapsed"} ${panelOpen ? "panel-open" : ""}`} aria-label="Mirrored gesture tracking camera">
         <div className="lamp-camera-head">
-          <span><i className={cameraLive ? "live" : ""} /> HAND + FACE TRACKING <small>21 LANDMARKS / HAND</small></span>
+          <span><i className={cameraLive ? "live" : ""} /> HAND + MASK TRACKING <small>3D FACE POSE + BLINK + JAW / LIVE</small></span>
           <button type="button" onClick={() => setCameraExpanded((expanded) => !expanded)} aria-label={cameraExpanded ? "Collapse camera" : "Expand camera"}>{cameraExpanded ? "−" : "+"}</button>
         </div>
         <div className="lamp-camera-view">
           <video ref={videoRef} muted playsInline aria-label="Camera preview">
             <track kind="captions" src="/lamp/empty.vtt" srcLang="en" label="No spoken content" />
           </video>
-          <canvas ref={overlayRef} aria-label="Tracked hand and mouth landmarks" />
+          <canvas
+            ref={faceMaskCanvasRef}
+            className="lamp-face-mask-layer"
+            aria-label="Tracked three-dimensional face mask"
+          />
+          <canvas
+            ref={overlayRef}
+            className="lamp-hand-landmark-layer"
+            aria-label="Tracked hand landmarks"
+          />
           {!cameraLive && <div className="lamp-camera-empty">CAMERA<small>OFFLINE</small></div>}
           <i className="frame tl" /><i className="frame tr" /><i className="frame bl" /><i className="frame br" />
           {currentGesture && cameraLive && <div className="lamp-gesture-badge">{GESTURE_LABELS[currentGesture]}</div>}
