@@ -5,17 +5,17 @@ const description =
   "Teach an expressive 3D character lamp gestures, movement, and personality with private on-device camera tracking.";
 
 export const metadata: Metadata = {
-  title: "Luma Lamp Lab",
+  title: "Meet the lamp",
   description,
   openGraph: {
-    title: "Luma Lamp Lab",
+    title: "Meet the lamp",
     description,
     type: "website",
     images: ["/lamp/og.png"],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Luma Lamp Lab",
+    title: "Meet the lamp",
     description,
     images: ["/lamp/og.png"],
   },

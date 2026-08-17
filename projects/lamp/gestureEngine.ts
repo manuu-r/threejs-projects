@@ -277,7 +277,7 @@ const clamp = (value: number, minimum: number, maximum: number) =>
 
 /**
  * Maps raw MediaPipe coordinates into the mirrored selfie view used by the UI.
- * The IK target is calibrated around Luma's authored rest pose, so looking at a
+ * The IK target is calibrated around the lamp's authored rest pose, so looking at a
  * centered person keeps the weighted base upright instead of solving toward an
  * unrelated full-extension target.
  */
@@ -297,7 +297,7 @@ export function mapCameraTrackingTarget(
   );
 
   const mirroredPointX = direction ? -direction.x : 0;
-  // MediaPipe's Y axis increases downward. Luma's positive head pitch also
+  // MediaPipe's Y axis increases downward. The lamp's positive head pitch also
   // looks downward, so the raw pointing direction already has the right sign.
   const pointY = direction ? direction.y : 0;
   return {

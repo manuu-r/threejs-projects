@@ -297,7 +297,7 @@ function createLampScene(
   const beamTargetPoint = new THREE.Vector3();
 
   new GLTFLoader().load(
-    "/lamp/luma-character-lamp.glb",
+    "/lamp/character-lamp.glb",
     (gltf) => {
       lamp = gltf.scene;
       lamp.scale.setScalar(1.43);
@@ -751,7 +751,7 @@ export default function LampLab() {
 
   useEffect(() => {
     let cancelled = false;
-    const saved = localStorage.getItem("luma-gesture-mappings");
+    const saved = localStorage.getItem("lamp-gesture-mappings");
     if (!saved) return;
     try {
       const parsed = JSON.parse(saved) as Partial<GestureMappings>;
@@ -759,14 +759,14 @@ export default function LampLab() {
         if (!cancelled) setMappings({ ...DEFAULT_MAPPINGS, ...parsed });
       });
     } catch {
-      localStorage.removeItem("luma-gesture-mappings");
+      localStorage.removeItem("lamp-gesture-mappings");
     }
     return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     mappingsRef.current = mappings;
-    localStorage.setItem("luma-gesture-mappings", JSON.stringify(mappings));
+    localStorage.setItem("lamp-gesture-mappings", JSON.stringify(mappings));
   }, [mappings]);
 
   useEffect(() => {
@@ -1000,7 +1000,7 @@ export default function LampLab() {
           setStatusText(
             update.observation
               ? `${GESTURE_LABELS[update.observation.gesture]} · ${Math.round(update.observation.confidence * 100)}%`
-              : "Show Luma a gesture",
+              : "Show the lamp a gesture",
           );
         }
       }
@@ -1072,7 +1072,7 @@ export default function LampLab() {
       waveDetectorRef.current.reset();
       setCameraLive(true);
       setPhase("active");
-      setStatusText("Show Luma a gesture");
+      setStatusText("Show the lamp a gesture");
     } catch (error) {
       console.error(error);
       streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -1293,7 +1293,7 @@ export default function LampLab() {
       const href = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = href;
-      anchor.download = "luma-performance.webm";
+      anchor.download = "lamp-performance.webm";
       anchor.click();
       setTimeout(() => URL.revokeObjectURL(href), 500);
     };
@@ -1318,7 +1318,7 @@ export default function LampLab() {
     if (phase === "active") return "Tracking live";
     if (phase === "loading") return "Loading local vision";
     if (phase === "error") return "Permission needed";
-    return modelReady ? "Luma ready" : "Preparing Luma";
+    return modelReady ? "Lamp ready" : "Preparing lamp";
   }, [modelReady, phase]);
 
   return (
@@ -1326,7 +1326,7 @@ export default function LampLab() {
       className="lamp-shell"
       data-phase={phase}
       data-panel={panelOpen ? "open" : "closed"}
-      data-testid="luma-lamp-lab"
+      data-testid="lamp-lab"
     >
       <canvas ref={canvasRef} className="lamp-stage" aria-label="Expressive articulated 3D character lamp" />
       <div className="lamp-atmosphere" />
@@ -1335,7 +1335,7 @@ export default function LampLab() {
       <header className="lamp-topbar">
         <a className="lamp-brand" href="/" aria-label="Back to experiments">
           <span className="lamp-brand-mark">L</span>
-          <span>LUMA / BEHAVIOUR LAB</span>
+          <span>LAMP</span>
         </a>
         <div className="lamp-system">
           <span className="lamp-model-chip"><i className={modelReady ? "ready" : ""} /> CC0 ARTICULATED MODEL</span>
@@ -1349,11 +1349,11 @@ export default function LampLab() {
       </header>
 
       {(phase === "idle" || phase === "loading" || phase === "error") && (
-        <section className="lamp-intro" aria-labelledby="luma-title">
+        <section className="lamp-intro" aria-labelledby="lamp-title">
           <p className="lamp-kicker">A LAMP THAT LEARNS YOUR LANGUAGE</p>
-          <h1 id="luma-title">Meet Luma.<br /><em>Say it with your hands.</em></h1>
+          <h1 id="lamp-title">Meet the lamp.<br /><em>Say it with your hands.</em></h1>
           <p>
-            Point, wave, pause, or lean in. Luma reads your gestures locally and
+            Point, wave, pause, or lean in. The lamp reads your gestures locally and
             turns them into light, movement, and character.
           </p>
           <div className="lamp-intro-actions">
@@ -1397,7 +1397,7 @@ export default function LampLab() {
 
       <aside className={`lamp-editor ${panelOpen ? "open" : ""}`} aria-label="Lamp behavior editor">
         <div className="lamp-editor-head">
-          <div><small>PERSONALITY PACK</small><strong>Teach Luma</strong></div>
+          <div><small>PERSONALITY PACK</small><strong>Teach the lamp</strong></div>
           <button type="button" onClick={() => setPanelOpen(false)} aria-label="Close behavior editor">×</button>
         </div>
         <label className="lamp-field">
@@ -1410,7 +1410,7 @@ export default function LampLab() {
           <label><span>Brightness <b>{Math.round(settings.brightness * 100)}%</b></span><input type="range" min="0.05" max="1" step="0.05" value={settings.brightness} onChange={(event) => setSettings((current) => ({ ...current, brightness: Number(event.target.value) }))} /></label>
           <label className="lamp-color-field"><span>Light color</span><input type="color" value={settings.lightColor} onChange={(event) => setSettings((current) => ({ ...current, lightColor: event.target.value }))} /></label>
         </div>
-        <div className="lamp-mapping-head"><span>Gesture</span><span>Luma responds with</span></div>
+        <div className="lamp-mapping-head"><span>Gesture</span><span>Lamp responds with</span></div>
         <div className="lamp-mappings">
           {GESTURES.map((gesture) => (
             <label key={gesture}>

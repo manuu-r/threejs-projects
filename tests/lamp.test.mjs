@@ -20,14 +20,14 @@ async function render() {
   );
 }
 
-test("server-renders the Luma behavior lab", async () => {
+test("server-renders the lamp behavior experience", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>Luma Lamp Lab<\/title>/i);
-  assert.match(html, /Meet Luma\./);
+  assert.match(html, /<title>Meet the lamp<\/title>/i);
+  assert.match(html, /Meet the lamp\./);
   assert.match(html, /START CAMERA/);
   assert.match(html, /PREVIEW PERSONALITY/);
   assert.match(html, /BEHAVIOURS/);
@@ -35,12 +35,12 @@ test("server-renders the Luma behavior lab", async () => {
   assert.match(html, /HAND \+ MASK TRACKING/);
   assert.match(html, /3D FACE POSE \+ BLINK \+ JAW \/ LIVE/);
   assert.match(html, /video and landmarks never leave this device/i);
-  assert.match(html, /data-testid="luma-lamp-lab"/);
+  assert.match(html, /data-testid="lamp-lab"/);
 });
 
 test("ships the refined lamp and local vision dependencies", async () => {
   const [model, attribution] = await Promise.all([
-    readFile(new URL("public/lamp/luma-character-lamp.glb", projectRoot)),
+    readFile(new URL("public/lamp/character-lamp.glb", projectRoot)),
     readFile(new URL("public/lamp/ATTRIBUTION.md", projectRoot), "utf8"),
   ]);
   assert.ok(model.length > 500_000);
@@ -104,7 +104,7 @@ test("keeps recognition local and exports physical-lamp foundations", async () =
   assert.match(engine, /JOINT_LIMITS/);
   assert.match(punch, /export function createFaceMaskRenderer/);
 
-  assert.match(pack, /luma\.physical-board\/v1/);
+  assert.match(pack, /lamp\.physical-board\/v1/);
   assert.match(pack, /board-config\.json/);
   assert.match(pack, /motion-clips\.glb/);
   assert.match(pack, /application\/zip/);

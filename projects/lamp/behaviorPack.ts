@@ -138,8 +138,8 @@ export async function downloadBehaviorPack(settings: PackSettings) {
     {
       name: "lamp-behaviour.json",
       bytes: json({
-        schema: "luma.behaviour-pack/v1",
-        name: `${settings.personality} Luma`,
+        schema: "lamp.behaviour-pack/v1",
+        name: `${settings.personality} lamp`,
         createdAt,
         personality: {
           name: settings.personality,
@@ -182,7 +182,7 @@ export async function downloadBehaviorPack(settings: PackSettings) {
     {
       name: "board-config.json",
       bytes: json({
-        schema: "luma.physical-board/v1",
+        schema: "lamp.physical-board/v1",
         joints: JOINT_LIMITS,
         updateRateHz: 50,
         servoSmoothing: settings.smoothness,
@@ -196,7 +196,7 @@ export async function downloadBehaviorPack(settings: PackSettings) {
     },
     {
       name: "audio/README.txt",
-      bytes: encoder.encode("Add local personality sounds or music here. Audio is never uploaded by Luma Lamp Lab.\n"),
+      bytes: encoder.encode("Add local personality sounds or music here. Audio is never uploaded by the lamp experience.\n"),
     },
     {
       name: "ATTRIBUTION.md",
@@ -207,24 +207,24 @@ export async function downloadBehaviorPack(settings: PackSettings) {
   ];
 
   try {
-    const response = await fetch("/lamp/luma-character-lamp.glb");
+    const response = await fetch("/lamp/character-lamp.glb");
     if (response.ok) {
       files.push({ name: "motion-clips.glb", bytes: new Uint8Array(await response.arrayBuffer()) });
     }
   } catch {
     // The JSON clip definitions remain a usable fallback when an asset fetch is blocked.
   }
-  download("luma-behaviour-pack.zip", new Blob([zipStore(files)], { type: "application/zip" }));
+  download("lamp-behaviour-pack.zip", new Blob([zipStore(files)], { type: "application/zip" }));
 }
 
 export function downloadSessionReplay(events: SessionEvent[]) {
   download(
-    "luma-session-replay.json",
+    "lamp-session-replay.json",
     new Blob(
       [
         JSON.stringify(
           {
-            schema: "luma.session-replay/v1",
+            schema: "lamp.session-replay/v1",
             createdAt: new Date().toISOString(),
             mappings: DEFAULT_MAPPINGS,
             events,
