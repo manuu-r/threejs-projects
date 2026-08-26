@@ -43,8 +43,9 @@ dist/
 output/
 work/
 
-# MotoGP source/iteration archive (runtime-ready assets live in public/motogp)
-/art/motogp/
+# MotoGP Blender source exceeds GitHub's 100 MB per-file limit. Portable GLB
+# models, track data, and build tools under art/motogp are committed normally.
+/art/motogp/*.blend
 /public/motogp/bike.glb
 /public/motogp/gresini-ducati-2024.glb
 /public/motogp/racer-posed.glb
