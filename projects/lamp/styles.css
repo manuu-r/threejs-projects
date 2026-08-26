@@ -155,47 +155,6 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 1px s
 .lamp-live-actions button.active { border-color: rgba(98, 233, 255, 0.45); color: var(--lamp-cyan); }
 .lamp-live-actions button.recording { border-color: rgba(255, 107, 93, 0.58); color: #ff8a7d; }
 
-.lamp-editor {
-  position: absolute;
-  z-index: 10;
-  top: 72px;
-  right: 0;
-  bottom: 104px;
-  width: min(390px, 100vw);
-  overflow: hidden;
-  border-left: 1px solid var(--lamp-line);
-  background: rgba(7, 16, 21, 0.95);
-  box-shadow: -24px 0 80px rgba(0, 0, 0, 0.38);
-  backdrop-filter: blur(22px);
-  transform: translateX(102%);
-  transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.lamp-editor.open { overflow-y: auto; transform: translateX(0); }
-.lamp-editor-head { position: sticky; z-index: 2; top: 0; display: flex; align-items: center; justify-content: space-between; min-height: 80px; padding: 18px 22px; border-bottom: 1px solid var(--lamp-line); background: rgba(7, 16, 21, 0.94); backdrop-filter: blur(18px); }
-.lamp-editor-head div { display: grid; gap: 5px; }
-.lamp-editor-head small { color: var(--lamp-amber); font: 800 7px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.17em; }
-.lamp-editor-head strong { font: 400 25px/1 Georgia, serif; }
-.lamp-editor-head button { width: 32px; height: 32px; border: 1px solid var(--lamp-line); background: transparent; color: var(--lamp-muted); font-size: 21px; line-height: 1; cursor: pointer; }
-.lamp-field, .lamp-slider-grid { margin: 18px 22px; }
-.lamp-field { display: grid; gap: 8px; }
-.lamp-field > span, .lamp-slider-grid label > span { color: var(--lamp-muted); font: 700 7px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.1em; text-transform: uppercase; }
-.lamp-field input { height: 38px; padding: 0 11px; border: 1px solid var(--lamp-line); border-radius: 0; background: rgba(255, 255, 255, 0.035); color: var(--lamp-cream); }
-.lamp-slider-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 17px 18px; }
-.lamp-slider-grid label { display: grid; gap: 9px; }
-.lamp-slider-grid label > span { display: flex; justify-content: space-between; }
-.lamp-slider-grid b { color: var(--lamp-cyan); font-weight: 800; }
-.lamp-slider-grid input[type="range"] { width: 100%; height: 2px; accent-color: var(--lamp-amber); }
-.lamp-slider-grid .lamp-color-field { grid-template-columns: 1fr 47px; grid-column: span 2; align-items: center; }
-.lamp-color-field input { width: 47px; height: 26px; padding: 2px; border: 1px solid var(--lamp-line); background: transparent; }
-.lamp-mapping-head { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 12px; padding: 13px 22px 8px; border-top: 1px solid var(--lamp-line); color: rgba(255, 244, 223, 0.28); font: 800 6px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.12em; text-transform: uppercase; }
-.lamp-mappings { padding: 0 22px; }
-.lamp-mappings label { display: grid; grid-template-columns: 0.9fr 1.1fr; align-items: center; gap: 12px; min-height: 36px; border-bottom: 1px solid rgba(255, 255, 255, 0.055); }
-.lamp-mappings label > span { color: rgba(255, 244, 223, 0.68); font-size: 9px; }
-.lamp-mappings select { width: 100%; height: 25px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 0; background: #101f25; color: rgba(255, 244, 223, 0.7); font-size: 8px; }
-.lamp-editor-footer { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; padding: 18px 22px 24px; }
-.lamp-editor-footer button { min-height: 34px; border: 1px solid var(--lamp-line); background: transparent; color: rgba(255, 244, 223, 0.52); font: 800 6px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.08em; cursor: pointer; }
-.lamp-editor-footer .lamp-export-button { grid-column: span 2; display: flex; min-height: 45px; align-items: center; justify-content: space-between; padding: 0 15px; border-color: transparent; background: var(--lamp-amber); color: #180f05; font-size: 7px; }
-
 .lamp-camera {
   position: absolute;
   z-index: 7;
@@ -209,7 +168,6 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 1px s
   backdrop-filter: blur(14px);
   transition: right 300ms cubic-bezier(0.22, 1, 0.36, 1), width 220ms ease;
 }
-.lamp-camera.panel-open { right: 414px; }
 .lamp-camera-head { height: 40px; display: flex; align-items: center; justify-content: space-between; padding: 0 11px; border-bottom: 1px solid var(--lamp-line); color: rgba(255, 244, 223, 0.72); font: 700 7px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.12em; }
 .lamp-camera-head span { display: flex; align-items: center; gap: 8px; }
 .lamp-camera-head i.live { background: var(--lamp-cyan); box-shadow: 0 0 12px rgba(98, 233, 255, 0.8); }
@@ -268,7 +226,6 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 1px s
   .lamp-gesture-shortcuts { overflow-x: auto; scrollbar-width: none; }
   .lamp-gesture-shortcuts::-webkit-scrollbar { display: none; }
   .lamp-track-name { display: none; }
-  .lamp-camera.panel-open { right: 402px; }
 }
 
 @media (max-width: 850px) {
@@ -284,9 +241,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 1px s
   .lamp-intro-actions { flex-direction: row; }
   .lamp-intro .lamp-secondary-button { display: none; }
   .lamp-live-card { top: 82px; left: 18px; width: 205px; }
-  .lamp-editor { top: 62px; bottom: 84px; width: min(390px, 100vw); }
-  .lamp-camera, .lamp-camera.panel-open { right: 18px; bottom: 98px; width: min(286px, calc(100vw - 36px)); }
-  .lamp-camera.panel-open { opacity: 0; pointer-events: none; }
+  .lamp-camera { right: 18px; bottom: 98px; width: min(286px, calc(100vw - 36px)); }
   .lamp-dock { height: 84px; gap: 14px; overflow: hidden; padding: 0 18px; }
   .lamp-dock-copy { display: none; }
   .lamp-gesture-shortcuts button { width: 51px; height: 56px; }
@@ -300,12 +255,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 1px s
   .lamp-intro h1 em { font-size: 0.5em; }
   .lamp-intro > p:not(.lamp-kicker) { max-width: 88vw; }
   .lamp-live-card { width: 190px; padding: 15px; }
-  .lamp-slider-grid { grid-template-columns: 1fr; }
-  .lamp-slider-grid .lamp-color-field { grid-column: auto; }
   .lamp-camera { bottom: 96px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .lamp-editor, .lamp-camera { transition: none; }
+  .lamp-camera { transition: none; }
   .lamp-gesture-shortcuts button:hover { transform: none; }
 }

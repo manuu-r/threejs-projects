@@ -1,10 +1,9 @@
 import {
-  DEFAULT_MAPPINGS,
   JOINT_LIMITS,
   type GestureMappings,
   type GestureName,
   type LampAction,
-} from "./gestureEngine";
+} from "./gestureEngine.ts";
 
 export type SessionEvent = {
   at: number;
@@ -20,6 +19,11 @@ export type PackSettings = {
   lightColor: string;
   brightness: number;
   personality: string;
+};
+
+export type BehaviorPackBuildOptions = {
+  createdAt?: string;
+  motionClipGlb?: Uint8Array;
 };
 
 const encoder = new TextEncoder();
@@ -132,8 +136,11 @@ function download(filename: string, blob: Blob) {
   setTimeout(() => URL.revokeObjectURL(href), 500);
 }
 
-export async function downloadBehaviorPack(settings: PackSettings) {
-  const createdAt = new Date().toISOString();
+export function buildBehaviorPackArchive(
+  settings: PackSettings,
+  options: BehaviorPackBuildOptions = {},
+) {
+  const createdAt = options.createdAt ?? new Date().toISOString();
   const files: Array<{ name: string; bytes: Uint8Array }> = [
     {
       name: "lamp-behaviour.json",
@@ -206,34 +213,46 @@ export async function downloadBehaviorPack(settings: PackSettings) {
     },
   ];
 
+  if (options.motionClipGlb) {
+    files.push({ name: "motion-clips.glb", bytes: options.motionClipGlb });
+  }
+  return zipStore(files);
+}
+
+export async function downloadBehaviorPack(settings: PackSettings) {
+  let motionClipGlb: Uint8Array | undefined;
   try {
     const response = await fetch("/lamp/character-lamp.glb");
     if (response.ok) {
-      files.push({ name: "motion-clips.glb", bytes: new Uint8Array(await response.arrayBuffer()) });
+      motionClipGlb = new Uint8Array(await response.arrayBuffer());
     }
   } catch {
     // The JSON clip definitions remain a usable fallback when an asset fetch is blocked.
   }
-  download("lamp-behaviour-pack.zip", new Blob([zipStore(files)], { type: "application/zip" }));
+  const archive = buildBehaviorPackArchive(settings, { motionClipGlb });
+  download("lamp-behaviour-pack.zip", new Blob([archive], { type: "application/zip" }));
 }
 
-export function downloadSessionReplay(events: SessionEvent[]) {
-  download(
-    "lamp-session-replay.json",
-    new Blob(
-      [
-        JSON.stringify(
-          {
-            schema: "lamp.session-replay/v1",
-            createdAt: new Date().toISOString(),
-            mappings: DEFAULT_MAPPINGS,
-            events,
-          },
-          null,
-          2,
-        ),
-      ],
-      { type: "application/json" },
-    ),
+export function buildSessionReplay(
+  events: SessionEvent[],
+  mappings: GestureMappings,
+  createdAt = new Date().toISOString(),
+) {
+  return JSON.stringify(
+    {
+      schema: "lamp.session-replay/v1",
+      createdAt,
+      mappings,
+      events,
+    },
+    null,
+    2,
   );
+}
+
+export function downloadSessionReplay(events: SessionEvent[], mappings: GestureMappings) {
+  download("lamp-session-replay.json", new Blob(
+    [buildSessionReplay(events, mappings)],
+    { type: "application/json" },
+  ));
 }

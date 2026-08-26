@@ -10,28 +10,21 @@ export type GestureName =
   | "palm_move"
   | "open_palm"
   | "fist"
-  | "ok"
   | "peace"
   | "thumbs_up"
   | "thumbs_down"
   | "finger_near_lips"
-  | "wave"
-  | "camera_cover"
-  | "clap"
-  | "voice_follow"
-  | "voice_stay";
+  | "camera_cover";
 
 export type LampAction =
   | "point_light"
   | "follow_palm"
   | "freeze"
   | "pause"
-  | "confirm"
   | "friendly"
   | "closer"
   | "back"
   | "mute"
-  | "wave_back"
   | "sleep"
   | "wake"
   | "lock";
@@ -63,16 +56,11 @@ export const GESTURE_LABELS: Record<GestureName, string> = {
   palm_move: "Move palm",
   open_palm: "Open palm / stop",
   fist: "Hold fist",
-  ok: "OK sign",
   peace: "Peace sign",
   thumbs_up: "Thumbs up",
   thumbs_down: "Thumbs down",
   finger_near_lips: "Finger near lips",
-  wave: "Wave",
   camera_cover: "Cover camera",
-  clap: "Clap",
-  voice_follow: "“Follow me”",
-  voice_stay: "“Stay there”",
 };
 
 export const ACTION_LABELS: Record<LampAction, string> = {
@@ -80,12 +68,10 @@ export const ACTION_LABELS: Record<LampAction, string> = {
   follow_palm: "Follow palm",
   freeze: "Emergency freeze",
   pause: "Pause",
-  confirm: "Confirm / nod",
   friendly: "Friendly animation",
   closer: "Move closer",
   back: "Move back",
   mute: "Mute + quiet",
-  wave_back: "Wave back",
   sleep: "Sleep + dim",
   wake: "Wake up",
   lock: "Lock position",
@@ -96,24 +82,19 @@ export const DEFAULT_MAPPINGS: GestureMappings = {
   palm_move: "follow_palm",
   open_palm: "freeze",
   fist: "pause",
-  ok: "confirm",
   peace: "friendly",
   thumbs_up: "closer",
   thumbs_down: "back",
   finger_near_lips: "mute",
-  wave: "wave_back",
   camera_cover: "sleep",
-  clap: "wake",
-  voice_follow: "follow_palm",
-  voice_stay: "lock",
 };
 
 export const JOINT_LIMITS = {
   baseYaw: [-120, 120],
-  shoulderPitch: [-20, 95],
-  elbowPitch: [10, 135],
-  headPitch: [-45, 45],
-  headYaw: [-55, 55],
+  shoulderPitch: [-35, 100],
+  elbowPitch: [-40, 135],
+  headPitch: [-60, 60],
+  headYaw: [-65, 65],
 } as const;
 
 const HOLD_TIMES: Record<GestureName, number> = {
@@ -121,16 +102,11 @@ const HOLD_TIMES: Record<GestureName, number> = {
   palm_move: 300,
   open_palm: 110,
   fist: 450,
-  ok: 400,
   peace: 420,
   thumbs_up: 760,
   thumbs_down: 620,
   finger_near_lips: 650,
-  wave: 260,
   camera_cover: 900,
-  clap: 0,
-  voice_follow: 0,
-  voice_stay: 0,
 };
 
 const ACTION_DURATIONS: Record<LampAction, number> = {
@@ -138,12 +114,10 @@ const ACTION_DURATIONS: Record<LampAction, number> = {
   follow_palm: 1400,
   freeze: 620,
   pause: 900,
-  confirm: 900,
   friendly: 1800,
   closer: 1150,
   back: 1150,
   mute: 1200,
-  wave_back: 1500,
   sleep: 2200,
   wake: 1800,
   lock: 900,
@@ -171,6 +145,16 @@ export function palmCenter(hand: Landmark[]): Landmark {
   return midpoint([hand[0], hand[5], hand[9], hand[13], hand[17]]);
 }
 
+/** Normalized palm travel per second, sampled over a short jitter-filtering window. */
+export function palmMovementSpeed(
+  previous: Landmark,
+  current: Landmark,
+  elapsedMilliseconds: number,
+): number {
+  const elapsedSeconds = Math.max(elapsedMilliseconds / 1000, 1 / 120);
+  return distance(previous, current) / elapsedSeconds;
+}
+
 export function pointingVector(hand: Landmark[]): Landmark {
   const base = hand[5];
   const tip = hand[8];
@@ -194,13 +178,9 @@ export function classifyHandGesture(
   const palm = palmCenter(hand);
   const palmWidth = Math.max(distance(hand[5], hand[17]), 0.025);
   const thumbOpen = distance(hand[4], hand[5]) > palmWidth * 0.72;
-  const thumbIndexDistance = distance(hand[4], hand[8]) / palmWidth;
   const foldedCount = [index, middle, ring, pinky].filter((value) => !value).length;
   const confidence = Math.min(0.98, trackingConfidence * 0.96);
 
-  if (thumbIndexDistance < 0.3 && middle && ring && pinky) {
-    return { gesture: "ok", confidence, palm };
-  }
   if (index && middle && !ring && !pinky && distance(hand[8], hand[12]) > palmWidth * 0.42) {
     return { gesture: "peace", confidence, palm };
   }
@@ -286,14 +266,14 @@ export function mapCameraTrackingTarget(
   direction?: Landmark,
 ): CameraTrackingTarget {
   const mirroredX = 1 - palm.x;
-  const lateral = clamp((mirroredX - 0.5) * 2, -1, 1);
-  const verticalScreen = clamp((0.5 - palm.y) * 2, -1, 1);
-  const depth = clamp(-palm.z * 4, -0.7, 0.7);
+  const lateral = clamp((mirroredX - 0.5) * 2.35, -1, 1);
+  const verticalScreen = clamp((0.5 - palm.y) * 2.25, -1, 1);
+  const depth = clamp(-palm.z * 5, -0.9, 0.9);
 
   const rest = solveTwoBoneIK(0.637, 0.105);
   const target = solveTwoBoneIK(
-    0.637 + verticalScreen * 0.075 - depth * 0.03,
-    0.105 + depth * 0.11 + Math.abs(lateral) * 0.025,
+    0.637 + verticalScreen * 0.15 - depth * 0.04,
+    0.105 + depth * 0.18 + Math.abs(lateral) * 0.04,
   );
 
   const mirroredPointX = direction ? -direction.x : 0;
@@ -301,42 +281,12 @@ export function mapCameraTrackingTarget(
   // looks downward, so the raw pointing direction already has the right sign.
   const pointY = direction ? direction.y : 0;
   return {
-    baseYaw: clamp(lateral * degrees(28), -degrees(32), degrees(32)),
-    shoulder: clamp(target.shoulder - rest.shoulder, -degrees(18), degrees(22)),
-    elbow: clamp(target.elbow - rest.elbow, -degrees(26), degrees(24)),
-    headPitch: clamp(verticalScreen * degrees(18) + pointY * degrees(13), -degrees(38), degrees(38)),
-    headYaw: clamp(lateral * degrees(24) + mirroredPointX * degrees(14), -degrees(42), degrees(42)),
+    baseYaw: clamp(lateral * degrees(50), -degrees(52), degrees(52)),
+    shoulder: clamp(target.shoulder - rest.shoulder, -degrees(30), degrees(38)),
+    elbow: clamp(target.elbow - rest.elbow, -degrees(38), degrees(36)),
+    headPitch: clamp(-verticalScreen * degrees(31) + pointY * degrees(18), -degrees(52), degrees(52)),
+    headYaw: clamp(lateral * degrees(42) + mirroredPointX * degrees(18), -degrees(60), degrees(60)),
   };
-}
-
-export class WaveDetector {
-  private samples: Array<{ x: number; at: number }> = [];
-  private lastWave = -Infinity;
-
-  update(wristX: number, at: number) {
-    this.samples.push({ x: wristX, at });
-    this.samples = this.samples.filter((sample) => at - sample.at <= 850);
-    if (at - this.lastWave < 1200 || this.samples.length < 7) return false;
-    let reversals = 0;
-    let previousDirection = 0;
-    for (let index = 1; index < this.samples.length; index += 1) {
-      const delta = this.samples[index].x - this.samples[index - 1].x;
-      const direction = Math.abs(delta) > 0.012 ? Math.sign(delta) : previousDirection;
-      if (previousDirection && direction && direction !== previousDirection) reversals += 1;
-      previousDirection = direction;
-    }
-    const xs = this.samples.map((sample) => sample.x);
-    if (reversals >= 2 && Math.max(...xs) - Math.min(...xs) > 0.18) {
-      this.lastWave = at;
-      this.samples = [];
-      return true;
-    }
-    return false;
-  }
-
-  reset() {
-    this.samples = [];
-  }
 }
 
 export class GestureStateMachine {
