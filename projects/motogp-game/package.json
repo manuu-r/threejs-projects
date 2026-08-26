@@ -1,0 +1,30 @@
+{
+  "name": "motogp-game",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "gen:track": "node tools/gen-track.mjs",
+    "assets:bike": "blender --background --factory-startup --python tools/blender/build_bike.py",
+    "assets:track": "blender --background --factory-startup --python tools/blender/build_track.py",
+    "assets": "npm run gen:track && npm run assets:bike && npm run assets:track"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "jolt-physics": "^1.1.0",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.4",
+    "typescript": "~5.9",
+    "vite": "^8.2.2"
+  }
+}
