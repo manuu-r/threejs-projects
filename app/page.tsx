@@ -28,6 +28,10 @@ export default async function Home() {
     redirect("/lamp");
   }
 
+  if (subdomain === "motogp") {
+    redirect("/motogp");
+  }
+
   return (
     <main className="projects-index">
       <h1>tramapr.com</h1>
@@ -46,6 +50,9 @@ export default async function Home() {
         </li>
         <li>
           <a href="https://lamp.tramapr.com">lamp.tramapr.com</a>
+        </li>
+        <li>
+          <a href="/motogp">MotoGP Time Trial</a>
         </li>
       </ul>
 

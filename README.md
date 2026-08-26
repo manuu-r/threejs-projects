@@ -41,6 +41,10 @@ modeling/iteration support that makes “rough idea” become “playable scene.
   A camera-tracked heavy-bag challenge using MediaPipe hand landmarks, cannon-es
   physics, and Three.js scene composition.
 
+- `/motogp`
+  A Jolt Physics-powered MotoGP time trial with a 3D circuit, chase camera, and
+  persistent best-lap tracking.
+
 ## Local setup
 
 Requires Node.js `>=22.13.0`.

@@ -9,12 +9,13 @@
     "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
     "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
-    "test": "npm run build && node --test tests/interactable-memes.test.mjs tests/punch-power.test.mjs tests/hand-mapping.test.ts tests/lamp.test.mjs tests/lamp-gesture-engine.test.ts",
+    "test": "npm run build && node --test tests/interactable-memes.test.mjs tests/punch-power.test.mjs tests/hand-mapping.test.ts tests/lamp.test.mjs tests/lamp-gesture-engine.test.ts tests/motogp.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1",
     "cannon-es": "^0.20.0",
+    "jolt-physics": "^1.1.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "three": "^0.185.1"

@@ -1,0 +1,268 @@
+import { SURFACES } from '../config';
+import type { PhysicsWorld } from '../core/physicsWorld';
+import type { TrackData } from './TrackData';
+
+export interface AsphaltCollisionData {
+  version: 1;
+  source: string;
+  parts?: Array<{
+    object: string;
+    role: string;
+    vertexOffset: number;
+    vertexCount: number;
+    triangleOffset: number;
+    triangleCount: number;
+  }>;
+  /** Flat xyz triples in Three/Jolt coordinates (Y up). */
+  vertices: number[];
+  /** Flat vertex-index triples, wound upward. */
+  triangles: number[];
+}
+
+const GRID_CELL_SIZE = 25;
+const spatialIndexes = new WeakMap<AsphaltCollisionData, Map<string, number[]>>();
+
+export async function loadAsphaltCollision(
+  url = '/motogp/nurburgring-asphalt-collision.json',
+): Promise<AsphaltCollisionData> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`asphalt collision ${response.status} ${url}`);
+  const data = (await response.json()) as AsphaltCollisionData;
+  if (
+    data.version !== 1 ||
+    data.vertices.length < 9 ||
+    data.vertices.length % 3 !== 0 ||
+    data.triangles.length < 3 ||
+    data.triangles.length % 3 !== 0
+  ) {
+    throw new Error('invalid Nürburgring asphalt collision mesh');
+  }
+  spatialIndexes.set(data, buildSpatialIndex(data));
+  return data;
+}
+
+/**
+ * Static collision for the circuit. The asphalt triangles come directly from
+ * the supplied Nürburgring GLB. It combines the authored tarmac sections with
+ * their terrain underlay so every visible road section has continuous support
+ * while retaining the real elevation and camber.
+ */
+export function buildTrackPhysics(
+  world: PhysicsWorld,
+  _track: TrackData,
+  asphalt: AsphaltCollisionData,
+): void {
+  // Do not add a second, artificial floor below the venue. A bike that left
+  // the road used to land on that floor underneath the rendered circuit and
+  // could then drive around upside-down. The road-aware watchdog now restores
+  // the last safe asphalt pose before the bike can leave the scene.
+  world.addStaticMesh(asphalt.vertices, asphalt.triangles, {
+    friction: SURFACES.asphaltFriction,
+    restitution: 0,
+  });
+
+  world.optimizeBroadPhase();
+}
+
+export interface AsphaltSurfaceHit {
+  x: number;
+  y: number;
+  z: number;
+  /** Horizontal distance to the closest authored asphalt triangle. */
+  horizontalDistance: number;
+}
+
+/**
+ * Find the closest point on the authored asphalt in XZ, selecting the nearest
+ * elevation when circuit pieces overlap. This is the authoritative playable
+ * envelope; the legacy timing centerline is deliberately not consulted.
+ */
+export function queryAsphaltSurface(
+  asphalt: AsphaltCollisionData,
+  x: number,
+  y: number,
+  z: number,
+): AsphaltSurfaceHit {
+  const { vertices, triangles } = asphalt;
+  let bestScore = Infinity;
+  let bestX = x;
+  let bestY = y;
+  let bestZ = z;
+  let bestHorizontalSq = Infinity;
+
+  for (const i of candidateTriangleOffsets(asphalt, x, z)) {
+    const ai = triangles[i]! * 3;
+    const bi = triangles[i + 1]! * 3;
+    const ci = triangles[i + 2]! * 3;
+    const ax = vertices[ai]!, ay = vertices[ai + 1]!, az = vertices[ai + 2]!;
+    const bx = vertices[bi]!, by = vertices[bi + 1]!, bz = vertices[bi + 2]!;
+    const cx = vertices[ci]!, cy = vertices[ci + 1]!, cz = vertices[ci + 2]!;
+    const [wa, wb, wc] = closestTriangleWeights2d(x, z, ax, az, bx, bz, cx, cz);
+    const sx = ax * wa + bx * wb + cx * wc;
+    const sy = ay * wa + by * wb + cy * wc;
+    const sz = az * wa + bz * wb + cz * wc;
+    const horizontalSq = (sx - x) ** 2 + (sz - z) ** 2;
+    const vertical = sy - y;
+    // Horizontal containment dominates; vertical distance disambiguates
+    // bridges and stacked pieces of asphalt.
+    const score = horizontalSq + vertical * vertical * 0.04;
+    if (score >= bestScore) continue;
+    bestScore = score;
+    bestHorizontalSq = horizontalSq;
+    bestX = sx;
+    bestY = sy;
+    bestZ = sz;
+  }
+
+  return {
+    x: bestX,
+    y: bestY,
+    z: bestZ,
+    horizontalDistance: Math.sqrt(bestHorizontalSq),
+  };
+}
+
+/** Barycentric weights of the closest point on a triangle projected into XZ. */
+function closestTriangleWeights2d(
+  px: number,
+  pz: number,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  cx: number,
+  cz: number,
+): [number, number, number] {
+  const denominator = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
+  if (Math.abs(denominator) > 1e-9) {
+    const wa = ((bz - cz) * (px - cx) + (cx - bx) * (pz - cz)) / denominator;
+    const wb = ((cz - az) * (px - cx) + (ax - cx) * (pz - cz)) / denominator;
+    const wc = 1 - wa - wb;
+    if (wa >= 0 && wb >= 0 && wc >= 0) return [wa, wb, wc];
+  }
+
+  const ab = closestEdgeWeight(px, pz, ax, az, bx, bz);
+  const bc = closestEdgeWeight(px, pz, bx, bz, cx, cz);
+  const ca = closestEdgeWeight(px, pz, cx, cz, ax, az);
+  if (ab.distanceSq <= bc.distanceSq && ab.distanceSq <= ca.distanceSq) {
+    return [1 - ab.t, ab.t, 0];
+  }
+  if (bc.distanceSq <= ca.distanceSq) return [0, 1 - bc.t, bc.t];
+  return [ca.t, 0, 1 - ca.t];
+}
+
+function closestEdgeWeight(
+  px: number,
+  pz: number,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): { t: number; distanceSq: number } {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const lengthSq = dx * dx + dz * dz;
+  const t = lengthSq > 1e-12
+    ? Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / lengthSq))
+    : 0;
+  const x = ax + dx * t;
+  const z = az + dz * t;
+  return { t, distanceSq: (x - px) ** 2 + (z - pz) ** 2 };
+}
+
+/** Closest safe authored-road point; used only for spawn/recovery. */
+export function nearestAsphaltPoint(
+  asphalt: AsphaltCollisionData,
+  x: number,
+  y: number,
+  z: number,
+): { x: number; y: number; z: number } {
+  const edge = queryAsphaltSurface(asphalt, x, y, z);
+  const dx = edge.x - x;
+  const dz = edge.z - z;
+  const distance = Math.hypot(dx, dz);
+  if (distance < 0.1) return { x: edge.x, y: edge.y + 0.035, z: edge.z };
+
+  // The legacy timing line is outside the pit-straight asphalt. Continue from
+  // the closest edge toward the track by half a lane, then resolve elevation
+  // again. This produces a stable grid position on tarmac, not on the grass.
+  const inset = Math.min(4, distance);
+  const insetX = edge.x + (dx / distance) * inset;
+  const insetZ = edge.z + (dz / distance) * inset;
+  const road = queryAsphaltSurface(asphalt, insetX, y, insetZ);
+  return { x: road.x, y: road.y + 0.035, z: road.z };
+}
+
+function buildSpatialIndex(asphalt: AsphaltCollisionData): Map<string, number[]> {
+  const index = new Map<string, number[]>();
+  const { vertices, triangles } = asphalt;
+  const asphaltPart = asphalt.parts?.find((part) => part.role === 'asphalt');
+  const firstTriangle = asphaltPart ? asphaltPart.triangleOffset : 0;
+  const triangleCount = asphaltPart ? asphaltPart.triangleCount : triangles.length / 3;
+  const endTriangle = firstTriangle + triangleCount;
+  for (let triangleIndex = firstTriangle; triangleIndex < endTriangle; triangleIndex++) {
+    const i = triangleIndex * 3;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (let corner = 0; corner < 3; corner++) {
+      const offset = triangles[i + corner]! * 3;
+      const vx = vertices[offset]!;
+      const vz = vertices[offset + 2]!;
+      minX = Math.min(minX, vx);
+      maxX = Math.max(maxX, vx);
+      minZ = Math.min(minZ, vz);
+      maxZ = Math.max(maxZ, vz);
+    }
+    const minCellX = Math.floor(minX / GRID_CELL_SIZE);
+    const maxCellX = Math.floor(maxX / GRID_CELL_SIZE);
+    const minCellZ = Math.floor(minZ / GRID_CELL_SIZE);
+    const maxCellZ = Math.floor(maxZ / GRID_CELL_SIZE);
+    for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
+      for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
+        const key = `${cellX},${cellZ}`;
+        const cell = index.get(key);
+        if (cell) cell.push(i);
+        else index.set(key, [i]);
+      }
+    }
+  }
+  return index;
+}
+
+function candidateTriangleOffsets(
+  asphalt: AsphaltCollisionData,
+  x: number,
+  z: number,
+): readonly number[] {
+  let index = spatialIndexes.get(asphalt);
+  if (!index) {
+    index = buildSpatialIndex(asphalt);
+    spatialIndexes.set(asphalt, index);
+  }
+  const cellX = Math.floor(x / GRID_CELL_SIZE);
+  const cellZ = Math.floor(z / GRID_CELL_SIZE);
+  const direct = index.get(`${cellX},${cellZ}`);
+  if (direct?.length) return direct;
+
+  // Recovery queries can happen just outside a surface cell. Expand locally
+  // before falling back to the complete mesh, which is exceptionally rare.
+  for (let radius = 1; radius <= 4; radius++) {
+    const nearby: number[] = [];
+    for (let dx = -radius; dx <= radius; dx++) {
+      for (let dz = -radius; dz <= radius; dz++) {
+        if (Math.abs(dx) !== radius && Math.abs(dz) !== radius) continue;
+        const cell = index.get(`${cellX + dx},${cellZ + dz}`);
+        if (cell) nearby.push(...cell);
+      }
+    }
+    if (nearby.length) return nearby;
+  }
+  const asphaltPart = asphalt.parts?.find((part) => part.role === 'asphalt');
+  const firstTriangle = asphaltPart ? asphaltPart.triangleOffset : 0;
+  const triangleCount = asphaltPart
+    ? asphaltPart.triangleCount
+    : asphalt.triangles.length / 3;
+  return Array.from({ length: triangleCount }, (_, i) => (firstTriangle + i) * 3);
+}

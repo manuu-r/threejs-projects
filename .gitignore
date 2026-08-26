@@ -42,3 +42,11 @@ dist/
 .wrangler/
 output/
 work/
+
+# MotoGP source/iteration archive (runtime-ready assets live in public/motogp)
+/art/motogp/
+/public/motogp/bike.glb
+/public/motogp/gresini-ducati-2024.glb
+/public/motogp/racer-posed.glb
+/public/motogp/racer.glb
+/public/motogp/track.glb

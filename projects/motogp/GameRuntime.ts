@@ -1,0 +1,363 @@
+import * as THREE from 'three';
+import { LoadingScreen } from './ui/LoadingScreen';
+import { Hud } from './ui/Hud';
+import { Renderer } from './render/Renderer';
+import { ChaseCamera } from './render/ChaseCamera';
+import { Clock } from './core/clock';
+import { PhysicsWorld } from './core/physicsWorld';
+import { Controls } from './input/InputIntent';
+import { Bike } from './game/Bike';
+import { RespawnMonitor } from './game/Respawn';
+import { TrackData } from './track/TrackData';
+import {
+  buildTrackPhysics,
+  loadAsphaltCollision,
+  nearestAsphaltPoint,
+  queryAsphaltSurface,
+} from './track/TrackPhysics';
+import { loadTrackVisuals } from './track/TrackVisuals';
+import { createTrackAtmosphere } from './track/TrackAtmosphere';
+import { Checkpoints } from './track/Checkpoints';
+import { LapTimer } from './timing/LapTimer';
+import { BestLapStore } from './timing/BestLapStore';
+import { ENGINE, PHYSICS } from './config';
+import { EngineSound } from './audio/EngineSound';
+
+/**
+ * Bootstrap: loading screen -> physics init -> circuit build -> game loop.
+ * Fixed-step: input -> bike forces -> physics step -> telemetry -> timing.
+ */
+
+/**
+ * Starts the game within a React-owned host and returns its teardown function.
+ * Keeping this runtime DOM-local lets the experiment coexist with the other
+ * routes in the shared app shell rather than owning the whole document.
+ */
+export async function startMotoGpGame(container: HTMLElement): Promise<() => void> {
+  const params = new URLSearchParams(window.location.search);
+  /** Dev-only autopilot (`?autodrive`): pure-pursuit laps for headless verification. */
+  const AUTO = params.has('autodrive');
+  /** `?autodrive&steertest`: straight, then hold full-right — verifies turn handedness. */
+  const STEER_TEST = params.has('steertest');
+  const AUTO_STEPS_PER_FRAME = 200; // 3.33 s of sim per frame
+  const AUTO_SIM_LIMIT_SEC = STEER_TEST ? 8 : 420;
+
+  container.replaceChildren();
+  const loading = new LoadingScreen(container);
+  loading.setText('Initializing physics…');
+
+  const renderer3d = new Renderer(container);
+  const clock = new Clock();
+  const world = await PhysicsWorld.create();
+
+  loading.setText('Loading circuit…');
+  const track = await TrackData.load();
+  const asphalt = await loadAsphaltCollision();
+  buildTrackPhysics(world, track, asphalt);
+  await loadTrackVisuals(renderer3d.scene);
+  const atmosphere = createTrackAtmosphere(track);
+  renderer3d.scene.add(atmosphere.root);
+
+  const controls = new Controls();
+  const engineSound = new EngineSound();
+  const spawn = track.spawnPose();
+  // Resolve the grid anchor vertically against the authored surface. The GLB
+  // contains stacked terrain and tarmac, so the centerline elevation is needed
+  // to choose the visible road rather than the lower terrain shell.
+  const spawnRoad = nearestAsphaltPoint(asphalt, spawn.x, spawn.y, spawn.z);
+  const bike = new Bike(world, spawnRoad, spawn.yaw);
+  renderer3d.scene.add(bike.root);
+  // Do not render the procedural fallback for a frame while the large Ducati
+  // asset streams in. It remains available only if the GLB genuinely fails.
+  loading.setText('Loading Ducati and rider…');
+  await bike.ready;
+
+  const chase = new ChaseCamera(renderer3d.camera);
+  bike.syncVisuals();
+  chase.snap(bike.root.position); // no first-frame camera lerp across the map
+
+  // --- timing / rules ---------------------------------------------------------
+  const bestLapStore = new BestLapStore();
+  let bestMs = bestLapStore.load();
+  const lapTimer = new LapTimer();
+  const checkpoints = new Checkpoints(track);
+  const respawnMonitor = new RespawnMonitor();
+  const hud = new Hud(container, track, bestMs);
+
+  const intent = controls.intent;
+
+  let paused = false;
+  let simTimeSec = 0;
+  let lastDriveAngle = 0; // autodrive steering angle, for the progress log
+  let lapWasValid = true; // for transition-only invalid logging
+  let stuckSec = 0; // autodrive: low-speed timer triggering recovery
+  let steerLogNext = 0; // steertest: next simTime to log heading
+  const bikePos = new THREE.Vector3();
+  const bikeFwd = new THREE.Vector3();
+  let lastSafeRoad = { x: spawnRoad.x, y: spawnRoad.y, z: spawnRoad.z, yaw: spawn.yaw };
+  const safeRoadHistory = [lastSafeRoad];
+  let nextSafePoseSampleSec = 0;
+
+  // Autopilot corner-speed plan: per-sample target speed from local curvature
+  // (v = sqrt(aLat / curvature)), capped to the straight-line pace.
+  const AUTO_VMAX = 52; // m/s ≈ 187 km/h
+  const AUTO_ALAT = 8.5; // m/s² cornering trust
+  const speedTarget: number[] = [];
+  {
+    const k = 6; // half-window: ±24 m of centerline
+    for (let i = 0; i < track.count; i++) {
+      const a = track.samples[(i - k + track.count) % track.count]!.t;
+      const b = track.samples[(i + k) % track.count]!.t;
+      const dot = Math.max(-1, Math.min(1, a[0] * b[0] + a[2] * b[2]));
+      const curv = Math.acos(dot) / (2 * k * track.spacing);
+      speedTarget.push(Math.min(AUTO_VMAX, Math.sqrt(AUTO_ALAT / Math.max(curv, 1e-4))));
+    }
+  }
+
+  function fixedStep(dt: number): void {
+    if (paused) return;
+    simTimeSec += dt;
+
+    controls.update(dt);
+    if (AUTO) autodrive();
+    bike.prePhysicsUpdate(dt, intent);
+    world.step(dt);
+    bike.postPhysicsUpdate();
+    // Read directly from Jolt. Visual root transforms update only once per
+    // rendered frame and were too stale to protect a fast-moving bike.
+    const uprightDot = bike.getPhysicsPoseInto(bikePos, bikeFwd);
+    const surface = queryAsphaltSurface(asphalt, bikePos.x, bikePos.y, bikePos.z);
+    const heightAboveSurface = bikePos.y - surface.y;
+    const securelyOnAsphalt =
+      surface.horizontalDistance < 0.12 &&
+      heightAboveSurface > 0.25 &&
+      heightAboveSurface < 1.8 &&
+      uprightDot > 0.78 &&
+      bike.telemetry.wheelContacts[0] &&
+      bike.telemetry.wheelContacts[1];
+    if (securelyOnAsphalt && simTimeSec >= nextSafePoseSampleSec) {
+      safeRoadHistory.push({
+        x: surface.x,
+        y: surface.y,
+        z: surface.z,
+        yaw: Math.atan2(bikeFwd.x, bikeFwd.z),
+      });
+      if (safeRoadHistory.length > 8) safeRoadHistory.shift();
+      // Recover roughly 0.75 s before the newest safe sample, not at the
+      // unstable edge of the incident that triggered the watchdog.
+      lastSafeRoad = safeRoadHistory[Math.max(0, safeRoadHistory.length - 4)]!;
+      nextSafePoseSampleSec = simTimeSec + 0.25;
+    }
+
+    const ev = checkpoints.update(bikePos.x, bikePos.z);
+    if (ev.lapStarted) {
+      lapTimer.start(simTimeSec);
+      if (AUTO) console.log(`[lap] started @${simTimeSec.toFixed(2)}s`);
+    }
+    if (!checkpoints.valid && lapTimer.running) {
+      lapTimer.invalidateCurrent();
+      if (AUTO && lapWasValid) console.log(`[lap] invalidated @${simTimeSec.toFixed(2)}s`);
+    }
+    lapWasValid = checkpoints.valid;
+    if (ev.lapCompleted) {
+      const ms = lapTimer.completeLap(simTimeSec);
+      if (AUTO) console.log(`[lap] completed ${ms}ms @${simTimeSec.toFixed(2)}s`);
+      if (ms !== null && (bestMs === null || ms < bestMs)) {
+        bestMs = ms;
+        bestLapStore.save(ms);
+        if (AUTO) console.log(`[lap] best saved ${ms}ms (localStorage: ${bestLapStore.load()})`);
+      }
+    }
+
+    // Auto-respawn watchdog.
+    let needsRespawn = false;
+    if (!STEER_TEST) needsRespawn = respawnMonitor.update(dt, simTimeSec, {
+      uprightDot,
+      surfaceDistance: surface.horizontalDistance,
+      heightAboveSurface,
+    });
+    if (needsRespawn) {
+      if (AUTO) console.log(`[lap] auto-respawn @${simTimeSec.toFixed(2)}s`);
+      doRespawn(false);
+    }
+  }
+
+  if (AUTO) {
+    // Headless virtual time fast-forwards TIMERS, not rAF (which fires only a
+    // handful of times), so the autopilot drives the sim from a timer chain.
+    const autoTick = (): void => {
+      if (simTimeSec >= AUTO_SIM_LIMIT_SEC) {
+        console.log(`[auto] done t=${simTimeSec.toFixed(1)}s`);
+        return;
+      }
+      const lastLog = Math.floor(simTimeSec / 10);
+      for (let k = 0; k < AUTO_STEPS_PER_FRAME; k++) fixedStep(1 / PHYSICS.fixedHz);
+      if (Math.floor(simTimeSec / 10) !== lastLog) {
+        console.log(
+          `[auto] t=${simTimeSec.toFixed(1)}s speed=${bike.telemetry.speedKph.toFixed(0)}km/h ` +
+          `gear=${bike.telemetry.gear} nearest=${checkpoints.nearestIndex} ` +
+          `ang=${((lastDriveAngle * 180) / Math.PI).toFixed(0)}deg valid=${checkpoints.valid}`,
+        );
+      }
+      bike.syncVisuals();
+      hud.update(
+        {
+          speedKph: bike.telemetry.speedKph,
+          gear: bike.telemetry.gear,
+          rpm01: bike.telemetry.rpm / ENGINE.maxRpm,
+          leanDeg: bike.telemetry.leanDeg,
+          currentMs: lapTimer.currentMs(simTimeSec),
+          lastLapMs: lapTimer.lastLapMs,
+          bestMs,
+          lapValid: checkpoints.valid,
+          cameraMode: chase.modeLabel,
+          bikePos,
+        },
+        performance.now(),
+      );
+      setTimeout(autoTick, 0);
+    };
+    setTimeout(autoTick, 0);
+  } else {
+    clock.onFixedStep = fixedStep;
+  }
+
+  /** Pure-pursuit + curvature speed plan along the centerline (verification only). */
+  function autodrive(): void {
+    // Handedness probe: cruise straight, then hold full-right steering. This
+    // model/controller pairing produces decreasing mathematical yaw for the
+    // player-visible right turn; the live camera view is authoritative.
+    if (STEER_TEST) {
+      intent.throttle = 0.5;
+      intent.brake = 0;
+      intent.steer = simTimeSec < 2.5 ? 0 : 1;
+      bike.getForwardInto(bikeFwd);
+      if (simTimeSec >= steerLogNext) {
+        steerLogNext += 0.25;
+        console.log(
+          `[steer] t=${simTimeSec.toFixed(2)} ` +
+          `yaw=${((Math.atan2(bikeFwd.x, bikeFwd.z) * 180) / Math.PI).toFixed(1)} ` +
+          `x=${bike.root.position.x.toFixed(1)} z=${bike.root.position.z.toFixed(1)} ` +
+          `v=${bike.telemetry.speedKph.toFixed(0)}`,
+        );
+      }
+      return;
+    }
+
+    const i = checkpoints.nearestIndex;
+    if (i < 0) return;
+    const speed = bike.telemetry.speedKph / 3.6;
+
+    // A race bike has no reverse. The verification driver uses the same safe
+    // recovery action as the player if it becomes beached or faces backward.
+    const backwards = Math.abs(lastDriveAngle) > 2.1; // ~120°
+    if ((speed < 0.6 && !backwards) || (backwards && speed < 2)) {
+      stuckSec += 1 / PHYSICS.fixedHz;
+      if (stuckSec > 4) {
+        stuckSec = 0;
+        doRespawn(false);
+        if (AUTO) console.log(`[auto] recovered stuck bike @${simTimeSec.toFixed(1)}s`);
+        return;
+      }
+    } else {
+      stuckSec = 0;
+    }
+
+    const ahead = Math.max(3, Math.round((6 + speed * 0.9) / track.spacing));
+    const target = track.samples[(i + ahead) % track.count]!;
+    bike.getForwardInto(bikeFwd);
+    const dx = target.p[0] - bike.root.position.x;
+    const dz = target.p[2] - bike.root.position.z;
+    const len = Math.hypot(dx, dz) || 1;
+    const nx = dx / len;
+    const nz = dz / len;
+    // Signed angle forward->target about +Y (positive = target to the right).
+    const angle = Math.atan2(bikeFwd.z * nx - bikeFwd.x * nz, bikeFwd.x * nx + bikeFwd.z * nz);
+    intent.steer = Math.max(-1, Math.min(1, angle * 2.0));
+    lastDriveAngle = angle;
+
+    // Speed plan: slowest corner within braking range, relaxed by distance.
+    let vAllow = AUTO_VMAX;
+    for (let d = 0; d < 90; d += 3) {
+      const vt = speedTarget[(i + d) % track.count]!;
+      vAllow = Math.min(vAllow, Math.sqrt(vt * vt + 2 * 7 * d * track.spacing));
+    }
+    if (speed < vAllow) intent.throttle = 0.9;
+    else intent.throttle = 0;
+    intent.brake = speed > vAllow + 2 ? 0.7 : 0;
+  }
+
+  function doRespawn(manual: boolean): void {
+    // A held throttle/steering command was immediately recreating the crash,
+    // causing an inescapable recover-crash loop. Require a fresh key press.
+    controls.reset();
+    bike.respawnAt(
+      lastSafeRoad.x,
+      lastSafeRoad.y,
+      lastSafeRoad.z,
+      lastSafeRoad.yaw,
+    );
+    bikePos.set(lastSafeRoad.x, lastSafeRoad.y, lastSafeRoad.z);
+    if (manual) respawnMonitor.notifyManual(simTimeSec);
+    checkpoints.invalidate(); // respawns never count toward the current lap
+    if (lapTimer.running) lapTimer.invalidateCurrent();
+  }
+
+  clock.onFrame = (frameDt) => {
+    bike.syncVisuals();
+    bikePos.copy(bike.root.position);
+    bike.getForwardInto(bikeFwd);
+
+    // Autopilot runs skip rendering — headless verification only needs the HUD DOM.
+    if (!AUTO) {
+      chase.update(frameDt, bikePos, bikeFwd, bike.telemetry.leanDeg, bike.telemetry.speedKph / 3.6);
+      renderer3d.trackSunOn({ x: bikePos.x, y: bikePos.y, z: bikePos.z });
+      renderer3d.render();
+    }
+    engineSound.update(bike.telemetry.rpm / ENGINE.maxRpm, intent.throttle);
+
+    hud.update(
+      {
+        speedKph: bike.telemetry.speedKph,
+        gear: bike.telemetry.gear,
+        rpm01: bike.telemetry.rpm / ENGINE.maxRpm,
+        leanDeg: bike.telemetry.leanDeg,
+        currentMs: lapTimer.currentMs(simTimeSec),
+        lastLapMs: lapTimer.lastLapMs,
+        bestMs,
+        lapValid: checkpoints.valid,
+        cameraMode: chase.modeLabel,
+        bikePos,
+      },
+      performance.now(),
+    );
+
+    // Edge-triggered input handling (per rendered frame is plenty).
+    const actions = controls.takeActions();
+    if (actions.cameraToggle) {
+      chase.toggleMode();
+      bike.setRiderVisible(chase.mode === 'rear');
+    }
+    if (actions.pauseToggle) {
+      paused = !paused;
+      engineSound.setMuted(paused);
+    }
+    if (actions.rebuildBike) bike.rebuild();
+    if (actions.recover) doRespawn(true);
+  };
+
+  clock.start();
+  loading.hide();
+
+  return () => {
+    clock.stop();
+    controls.dispose();
+    engineSound.dispose();
+    hud.dispose();
+    atmosphere.dispose();
+    bike.dispose();
+    world.dispose();
+    renderer3d.dispose();
+    container.replaceChildren();
+  };
+}
