@@ -1,4 +1,4 @@
-import { TIMING } from '../config';
+import { TIMING } from '../config.ts';
 
 /** Best-lap persistence. Tolerates missing/broken localStorage silently. */
 export class BestLapStore {
@@ -24,6 +24,28 @@ export class BestLapStore {
       localStorage.setItem(this.key, JSON.stringify(Math.round(ms)));
     } catch {
       // Private mode / quota — best lap just won't persist.
+    }
+  }
+
+  loadHistory(): number[] {
+    try {
+      const parsed: unknown = JSON.parse(localStorage.getItem(TIMING.lapListStorageKey) ?? '[]');
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0)
+        .slice(-50);
+    } catch {
+      return [];
+    }
+  }
+
+  appendHistory(ms: number): void {
+    try {
+      const history = this.loadHistory();
+      history.push(Math.round(ms));
+      localStorage.setItem(TIMING.lapListStorageKey, JSON.stringify(history.slice(-50)));
+    } catch {
+      // Persistent history is optional when storage is unavailable.
     }
   }
 }

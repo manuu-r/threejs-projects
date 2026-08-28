@@ -69,7 +69,28 @@ test("recovers against the authored asphalt instead of a synthetic world floor",
   const collision = JSON.parse(collisionSource);
   assert.ok(collision.vertices.length / 3 >= 100_000, "all authored driveable surfaces must ship");
   assert.ok(collision.triangles.length / 3 >= 70_000, "collision must cover every tarmac section");
-  assert.ok(collision.parts.some((part) => part.object === "Object_27"), "start-grid tarmac must collide");
+  assert.ok(collision.parts.some((part) => part.object === "Object_24" && part.role === "asphalt"));
+  for (const part of collision.parts) {
+    const first = part.triangleOffset * 3;
+    const end = first + part.triangleCount * 3;
+    for (const index of collision.triangles.slice(first, end)) {
+      assert.ok(index >= part.vertexOffset && index < part.vertexOffset + part.vertexCount,
+        `${part.role} triangle must reference only its own authored vertices`);
+    }
+  }
+  assert.match(physicsSource, /frictionForRole/);
+  assert.match(physicsSource, /case 'gravel'/);
+});
+
+test("removes the accidental legacy bike and hardens driveable track materials", async () => {
+  const visualsSource = await readFile(
+    new URL("projects/motogp/track/TrackVisuals.ts", projectRoot),
+    "utf8",
+  );
+  assert.match(visualsSource, /EXCLUDED_VENUE_OBJECTS = new Set\(\['a\.001'\]\)/);
+  assert.match(visualsSource, /DRIVEABLE_SURFACES/);
+  assert.match(visualsSource, /material\.transparent = false/);
+  assert.match(visualsSource, /material\.map\.anisotropy/);
 });
 
 test("ships explicit rear chase and rider camera modes", async () => {
@@ -117,15 +138,185 @@ test("clears held controls and uses an older stable pose during recovery", async
 });
 
 test("shows the automatic gear and drives engine audio from live RPM", async () => {
-  const [runtimeSource, soundSource, hudSource] = await Promise.all([
+  const [runtimeSource, soundSource, hudSource, bikeSource, configSource] = await Promise.all([
     readFile(new URL("projects/motogp/GameRuntime.ts", projectRoot), "utf8"),
     readFile(new URL("projects/motogp/audio/EngineSound.ts", projectRoot), "utf8"),
     readFile(new URL("projects/motogp/ui/Hud.ts", projectRoot), "utf8"),
+    readFile(new URL("projects/motogp/game/Bike.ts", projectRoot), "utf8"),
+    readFile(new URL("projects/motogp/config.ts", projectRoot), "utf8"),
   ]);
   assert.match(runtimeSource, /new EngineSound\(\)/);
-  assert.match(runtimeSource, /engineSound\.update\(bike\.telemetry\.rpm \/ ENGINE\.maxRpm, intent\.throttle\)/);
+  assert.match(runtimeSource, /engineSound\.update\([\s\S]*bike\.telemetry\.rpm \/ ENGINE\.maxRpm[\s\S]*intent\.throttle/);
   assert.match(runtimeSource, /engineSound\.dispose\(\)/);
   assert.match(soundSource, /new AudioContext\(\)/);
   assert.match(soundSource, /window\.addEventListener\('keydown', this\.arm\)/);
   assert.match(hudSource, /AUTO · GEAR/);
+  assert.match(bikeSource, /ETransmissionMode_Manual/);
+  assert.match(bikeSource, /this\.telemetry\.gear = this\.gearbox\.gear/);
+  assert.match(configSource, /gearRatios: \[3\.35, 2\.55, 2\.02, 1\.68, 1\.42, 1\.2\]/);
+});
+
+test("automatic MotoGP gearbox holds a road gear while coasting", async () => {
+  const { AutomaticGearbox } = await import(
+    new URL("../projects/motogp/game/AutomaticGearbox.ts", import.meta.url)
+  );
+  const gearbox = new AutomaticGearbox({
+    gearRatios: [3.35, 2.55, 2.02, 1.68, 1.42, 1.2],
+    differentialRatio: 3.4,
+    wheelRadiusM: 0.31,
+    maxRpm: 12500,
+    shiftUpRpm: 10800,
+    shiftDownRpm: 6200,
+    kickdownRpm: 900,
+    shiftDurationSec: 0.1,
+    shiftLockoutSec: 0.14,
+  });
+
+  // Accelerate beyond the old first-gear ceiling and allow each quickshift to finish.
+  for (const speedKph of [140, 140, 140, 180, 180, 180, 220, 220, 220]) {
+    for (let i = 0; i < 20; i++) gearbox.update(1 / 60, speedKph / 3.6, 1);
+  }
+  assert.ok(gearbox.gear >= 4, `expected an upshift sequence, got gear ${gearbox.gear}`);
+
+  // Releasing the throttle can downshift as speed falls, but can never select N.
+  for (let speedKph = 220; speedKph >= 0; speedKph -= 2) {
+    const command = gearbox.update(1 / 60, speedKph / 3.6, 0);
+    assert.ok(command.gear >= 1);
+  }
+  assert.equal(gearbox.gear, 1);
+});
+
+test("crash detection ignores kerbs but separates major impacts", async () => {
+  const { CrashDetector } = await import(
+    new URL("../projects/motogp/game/CrashDetector.ts", import.meta.url)
+  );
+  const detector = new CrashDetector();
+  assert.equal(detector.update({
+    speedMps: 35,
+    deltaVelocityMps: 2.2,
+    uprightDot: 0.92,
+    angularSpeedRad: 1.4,
+    frontContact: true,
+    rearContact: true,
+  }), null);
+  const crash = detector.update({
+    speedMps: 35,
+    deltaVelocityMps: 11,
+    uprightDot: 0.12,
+    angularSpeedRad: 9,
+    frontContact: true,
+    rearContact: false,
+  });
+  assert.ok(crash);
+  assert.ok(crash.severity >= 0.45 && crash.severity <= 1);
+  assert.equal(detector.update({
+    speedMps: 35,
+    deltaVelocityMps: 20,
+    uprightDot: -1,
+    angularSpeedRad: 15,
+    frontContact: false,
+    rearContact: false,
+  }), null, "one impact must emit one crash event");
+});
+
+test("cinematic slow motion is brief and requests one recovery", async () => {
+  const { CinematicSlowMotion } = await import(
+    new URL("../projects/motogp/game/CinematicSlowMotion.ts", import.meta.url)
+  );
+  const effect = new CinematicSlowMotion();
+  effect.trigger(0.8);
+  let minimum = 1;
+  let recoveries = 0;
+  for (let i = 0; i < 240; i++) {
+    const state = effect.update(1 / 60);
+    minimum = Math.min(minimum, state.timeScale);
+    if (state.recover) recoveries++;
+  }
+  assert.ok(minimum >= 0.2 && minimum < 0.5);
+  assert.equal(recoveries, 1);
+  assert.equal(effect.update(1 / 60).active, false);
+});
+
+test("lap timer records valid history with millisecond precision", async () => {
+  const { LapTimer } = await import(
+    new URL("../projects/motogp/timing/LapTimer.ts", import.meta.url)
+  );
+  const timer = new LapTimer();
+  timer.start(10);
+  assert.equal(timer.lapNumber, 1);
+  assert.equal(timer.completeLap(94.583), 84583);
+  timer.start(100);
+  timer.invalidateCurrent();
+  assert.equal(timer.completeLap(180), null);
+  assert.deepEqual(timer.historyMs, [84583]);
+  assert.equal(timer.sessionBestMs, 84583);
+  assert.equal(timer.lapNumber, 3, "invalid attempts still advance the current lap number");
+});
+
+test("best lap and recent lap history persist safely", async () => {
+  const savedStorage = globalThis.localStorage;
+  const values = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  };
+  try {
+    const { BestLapStore } = await import(
+      new URL("../projects/motogp/timing/BestLapStore.ts", import.meta.url)
+    );
+    const store = new BestLapStore("motogp.test.best");
+    store.save(84583.4);
+    store.appendHistory(85123.8);
+    store.appendHistory(84583.4);
+    assert.equal(store.load(), 84583);
+    assert.deepEqual(store.loadHistory(), [85124, 84583]);
+  } finally {
+    if (savedStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = savedStorage;
+  }
+});
+
+test("checkpoints require a complete forward lap in strict order", async () => {
+  const { Checkpoints } = await import(
+    new URL("../projects/motogp/track/Checkpoints.ts", import.meta.url)
+  );
+  const count = 100;
+  const samples = Array.from({ length: count }, (_, i) => ({
+    p: [i, 0, 0],
+    t: [1, 0, 0],
+    n: [0, 0, 1],
+  }));
+  const track = {
+    json: { checkpoints: 4, startSampleIndex: 0 },
+    count,
+    samples,
+    nearestSample: (x) => ((Math.round(x) % count) + count) % count,
+  };
+  const checkpoints = new Checkpoints(track);
+
+  checkpoints.update(98, 0);
+  assert.equal(checkpoints.update(2, 0).lapStarted, true);
+  for (const gate of [25, 50, 75]) {
+    checkpoints.update(gate - 2, 0);
+    assert.equal(checkpoints.update(gate + 2, 0).passed, true);
+  }
+  checkpoints.update(98, 0);
+  assert.equal(checkpoints.update(2, 0).lapCompleted, true);
+
+  const cut = new Checkpoints(track);
+  cut.update(98, 0);
+  cut.update(2, 0);
+  cut.update(48, 0);
+  cut.update(52, 0);
+  assert.equal(cut.valid, false, "skipping the first sector must invalidate the lap");
+});
+
+test("track collision welds render-only seams without changing its surface", async () => {
+  const source = await readFile(
+    new URL("projects/motogp/track/TrackPhysics.ts", projectRoot),
+    "utf8",
+  );
+  assert.match(source, /export function weldCollisionMesh/);
+  assert.match(source, /a === b \|\| b === c \|\| c === a/);
+  assert.match(source, /preventing suspension chatter/);
 });

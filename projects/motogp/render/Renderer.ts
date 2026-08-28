@@ -9,6 +9,7 @@ export class Renderer {
 
   private sun: THREE.DirectionalLight;
   private sunTarget: THREE.Object3D;
+  private readonly sunDirection = new THREE.Vector3();
   private readonly onResize = () => this.handleResize();
 
   constructor(private readonly container: HTMLElement) {
@@ -67,8 +68,12 @@ export class Renderer {
 
   /** Keep the shadow frustum centered near `target` (the bike). */
   trackSunOn(targetPos: { x: number; y: number; z: number }): void {
-    const dir = this.sun.position.clone().normalize();
-    this.sun.position.set(targetPos.x + dir.x * 200, targetPos.y + dir.y * 200, targetPos.z + dir.z * 200);
+    this.sunDirection.copy(this.sun.position).sub(this.sunTarget.position).normalize();
+    this.sun.position.set(
+      targetPos.x + this.sunDirection.x * 200,
+      targetPos.y + this.sunDirection.y * 200,
+      targetPos.z + this.sunDirection.z * 200,
+    );
     this.sunTarget.position.set(targetPos.x, targetPos.y, targetPos.z);
   }
 

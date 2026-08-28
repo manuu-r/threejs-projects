@@ -7,8 +7,8 @@ const FIXED_DT = 1 / PHYSICS.fixedHz;
  * Fixed-step callbacks run 0..maxSubsteps times per frame; frame callbacks run once.
  */
 export class Clock {
-  /** Called every fixed step with FIXED_DT. */
-  onFixedStep: (dt: number) => void = () => {};
+  /** Called with scaled simulation dt and unscaled race-clock dt. */
+  onFixedStep: (simulationDt: number, raceDt: number) => void = () => {};
   /** Called once per rendered frame with the (clamped) frame delta. */
   onFrame: (dt: number) => void = () => {};
 
@@ -17,9 +17,17 @@ export class Clock {
   private accumulator = 0;
   private running = false;
 
+  /** Physics-only cinematic scale; the accumulator and race clock stay real-time. */
+  timeScale = 1;
+
   fps = 0;
   /** Milliseconds spent inside onFixedStep this frame — debug HUD. */
   lastPhysicsMs = 0;
+
+  /** Fraction between the two latest fixed poses for render interpolation. */
+  get interpolationAlpha(): number {
+    return Math.max(0, Math.min(1, this.accumulator / FIXED_DT));
+  }
 
   start(): void {
     if (this.running) return;
@@ -49,7 +57,7 @@ export class Clock {
     let steps = 0;
     this.accumulator += frameDt;
     while (this.accumulator >= FIXED_DT && steps < PHYSICS.maxSubsteps) {
-      this.onFixedStep(FIXED_DT);
+      this.onFixedStep(FIXED_DT * this.timeScale, FIXED_DT);
       this.accumulator -= FIXED_DT;
       steps++;
     }

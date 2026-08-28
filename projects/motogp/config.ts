@@ -13,7 +13,8 @@ export const PHYSICS = {
   fixedHz: 60,
   maxSubsteps: 5,
   gravityY: -9.81,
-  collisionSteps: 1,
+  /** Two collision substeps plus linear casting prevent high-speed tunnelling. */
+  collisionSteps: 2,
   /** World coordinates must stay within ±2 km (float-precision WASM build). */
   maxWorldCoord: 2000,
 } as const;
@@ -60,15 +61,20 @@ export const ENGINE = {
 } as const;
 
 export const TRANSMISSION = {
-  gearRatios: [2.35, 1.9, 1.58, 1.33, 1.16, 1.04, 0.95],
-  shiftUpRpm: 11500,
-  shiftDownRpm: 6500,
-  clutchStrength: 3.0,
-  modeAuto: 0, // ETransmissionMode_Auto
+  /** Six close-ratio road gears; upshifts land near 111/146/184/221/261 km/h. */
+  gearRatios: [3.35, 2.55, 2.02, 1.68, 1.42, 1.2],
+  shiftUpRpm: 10800,
+  shiftDownRpm: 6200,
+  /** Additional downshift threshold at full throttle for quicker response. */
+  kickdownRpm: 900,
+  /** Seamless-box style torque cut and post-shift hysteresis. */
+  shiftDurationSec: 0.1,
+  shiftLockoutSec: 0.14,
+  clutchStrength: 8.0,
 } as const;
 
 export const DIFFERENTIAL = {
-  ratio: 3.2,
+  ratio: 3.4,
   limitedSlipRatio: 2.5,
   leftWheelIndex: -1,
   rightWheelIndex: 1, // single-track vehicle: both map to the rear wheel
@@ -119,7 +125,9 @@ export const TYRES = {
 export const SURFACES = {
   asphaltFriction: 1.25,
   grassFriction: 0.55,
+  gravelFriction: 0.72,
   kerbFriction: 1.1,
+  pavingFriction: 1.05,
   barrierFriction: 0.25,
 } as const;
 
@@ -142,6 +150,13 @@ export const CAMERA = {
   fovMaxDeg: 70,
   fovAtSpeedMps: 90,
   maxBankDeg: 8,
+  riderNear: 0.025,
+  /** Measured against the baked cockpit-hand bounds in the Blender rig. */
+  riderHeight: 0.48,
+  riderLongitudinalOffset: 0.14,
+  riderLookVerticalOffset: -1.5,
+  riderFovBaseDeg: 78,
+  riderFovMaxDeg: 84,
 } as const;
 
 export const RESPAWN = {
@@ -152,6 +167,14 @@ export const RESPAWN = {
   upsideDownDotThreshold: 0.3,
   upsideDownTimeSec: 0.75,
   spawnHeightAboveGround: 0.75,
+} as const;
+
+export const CRASH = {
+  riderMassKg: 70,
+  riderCapsuleRadius: 0.2,
+  riderCapsuleHalfHeight: 0.43,
+  riderFriction: 0.78,
+  riderRestitution: 0.12,
 } as const;
 
 export const TIMING = {

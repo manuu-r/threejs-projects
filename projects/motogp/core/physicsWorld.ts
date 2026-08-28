@@ -152,6 +152,54 @@ export class PhysicsWorld {
     return body.GetID();
   }
 
+  /** Continuous dynamic capsule used by the detached rider during a crash. */
+  addDynamicCapsule(
+    halfHeight: number,
+    radius: number,
+    position: { x: number; y: number; z: number },
+    rotation: { x: number; y: number; z: number; w: number },
+    massKg: number,
+    opts: {
+      friction?: number;
+      restitution?: number;
+      linearVelocity?: { x: number; y: number; z: number };
+      angularVelocity?: { x: number; y: number; z: number };
+    } = {},
+  ): BodyID {
+    const { Jolt } = this;
+    const shapeSettings = new Jolt.CapsuleShapeSettings(halfHeight, radius);
+    const shape = shapeSettings.Create().Get();
+    const bodySettings = new Jolt.BodyCreationSettings(
+      shape,
+      new Jolt.RVec3(position.x, position.y, position.z),
+      new Jolt.Quat(rotation.x, rotation.y, rotation.z, rotation.w),
+      Jolt.EMotionType_Dynamic,
+      LAYER_MOVING,
+    );
+    bodySettings.mOverrideMassProperties = Jolt.EOverrideMassProperties_CalculateInertia;
+    bodySettings.mMassPropertiesOverride.mMass = massKg;
+    bodySettings.mMotionQuality = Jolt.EMotionQuality_LinearCast;
+    bodySettings.mAllowSleeping = true;
+    bodySettings.mLinearDamping = 0.08;
+    bodySettings.mAngularDamping = 0.16;
+    const body = this.bodyInterface.CreateBody(bodySettings);
+    if (opts.friction !== undefined) body.SetFriction(opts.friction);
+    if (opts.restitution !== undefined) body.SetRestitution(opts.restitution);
+    const id = body.GetID();
+    this.bodyInterface.AddBody(id, Jolt.EActivation_Activate);
+    if (opts.linearVelocity) {
+      const v = new Jolt.Vec3(opts.linearVelocity.x, opts.linearVelocity.y, opts.linearVelocity.z);
+      this.bodyInterface.SetLinearVelocity(id, v);
+      Jolt.destroy(v);
+    }
+    if (opts.angularVelocity) {
+      const v = new Jolt.Vec3(opts.angularVelocity.x, opts.angularVelocity.y, opts.angularVelocity.z);
+      this.bodyInterface.SetAngularVelocity(id, v);
+      Jolt.destroy(v);
+    }
+    return id;
+  }
+
   destroyBody(id: BodyID): void {
     this.bodyInterface.RemoveBody(id);
     this.bodyInterface.DestroyBody(id);

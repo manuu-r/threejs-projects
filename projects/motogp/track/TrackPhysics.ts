@@ -56,12 +56,81 @@ export function buildTrackPhysics(
   // the road used to land on that floor underneath the rendered circuit and
   // could then drive around upside-down. The road-aware watchdog now restores
   // the last safe asphalt pose before the bike can leave the scene.
-  world.addStaticMesh(asphalt.vertices, asphalt.triangles, {
-    friction: SURFACES.asphaltFriction,
-    restitution: 0,
-  });
+  if (asphalt.parts?.length) {
+    for (const part of asphalt.parts) {
+      const vertexOffset = part.vertexOffset * 3;
+      const vertices = asphalt.vertices.slice(vertexOffset, vertexOffset + part.vertexCount * 3);
+      const triangleOffset = part.triangleOffset * 3;
+      const triangles = asphalt.triangles
+        .slice(triangleOffset, triangleOffset + part.triangleCount * 3)
+        .map((index) => index - part.vertexOffset);
+      const welded = weldCollisionMesh(vertices, triangles);
+      world.addStaticMesh(welded.vertices, welded.triangles, {
+        friction: frictionForRole(part.role),
+        restitution: 0,
+      });
+    }
+  } else {
+    world.addStaticMesh(asphalt.vertices, asphalt.triangles, {
+      friction: SURFACES.asphaltFriction,
+      restitution: 0,
+    });
+  }
 
   world.optimizeBroadPhase();
+}
+
+/**
+ * Merge position-identical vertices that were split only for UVs/materials in
+ * the render mesh. Shared indices let Jolt recognize internal triangle edges,
+ * preventing suspension chatter and tiny launches at invisible texture seams.
+ */
+export function weldCollisionMesh(
+  vertices: readonly number[],
+  triangles: readonly number[],
+  tolerance = 1e-4,
+): { vertices: number[]; triangles: number[] } {
+  const inverse = 1 / tolerance;
+  const weldedVertices: number[] = [];
+  const weldedTriangles: number[] = [];
+  const remap = new Uint32Array(vertices.length / 3);
+  const unique = new Map<string, number>();
+
+  for (let i = 0; i < vertices.length; i += 3) {
+    const x = vertices[i]!;
+    const y = vertices[i + 1]!;
+    const z = vertices[i + 2]!;
+    const key = `${Math.round(x * inverse)},${Math.round(y * inverse)},${Math.round(z * inverse)}`;
+    let index = unique.get(key);
+    if (index === undefined) {
+      index = weldedVertices.length / 3;
+      unique.set(key, index);
+      weldedVertices.push(x, y, z);
+    }
+    remap[i / 3] = index;
+  }
+
+  for (let i = 0; i < triangles.length; i += 3) {
+    const a = remap[triangles[i]!]!;
+    const b = remap[triangles[i + 1]!]!;
+    const c = remap[triangles[i + 2]!]!;
+    if (a === b || b === c || c === a) continue;
+    weldedTriangles.push(a, b, c);
+  }
+  return { vertices: weldedVertices, triangles: weldedTriangles };
+}
+
+function frictionForRole(role: string): number {
+  switch (role) {
+    case 'asphalt': return SURFACES.asphaltFriction;
+    case 'curb': return SURFACES.kerbFriction;
+    case 'gravel': return SURFACES.gravelFriction;
+    case 'paving': return SURFACES.pavingFriction;
+    case 'barrier': return SURFACES.barrierFriction;
+    case 'terrain':
+    case 'verge':
+    default: return SURFACES.grassFriction;
+  }
 }
 
 export interface AsphaltSurfaceHit {

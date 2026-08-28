@@ -11,6 +11,9 @@ export interface HudSnapshot {
   currentMs: number | null;
   lastLapMs: number | null;
   bestMs: number | null;
+  sessionBestMs: number | null;
+  lapNumber: number;
+  lapHistoryMs: readonly number[];
   /** False while the in-progress lap is invalidated. */
   lapValid: boolean;
   cameraMode: string;
@@ -35,7 +38,7 @@ function fmtTime(ms: number | null): string {
   const m = Math.floor(ms / 60000);
   const s = Math.floor((ms % 60000) / 1000);
   const milli = Math.floor(ms % 1000);
-  return `${m}:${String(s).padStart(2, '0')}.${String(milli).padStart(3, '0')}`;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(milli).padStart(3, '0')}`;
 }
 
 /** Plain-DOM racing HUD + 2D-canvas minimap. Internally throttled to ~15 Hz. */
@@ -48,7 +51,11 @@ export class Hud {
   private readonly currentTime: HTMLElement;
   private readonly lastTime: HTMLElement;
   private readonly bestTime: HTMLElement;
+  private readonly sessionBestTime: HTMLElement;
+  private readonly lapNumber: HTMLElement;
+  private readonly lapHistory: HTMLElement;
   private readonly invalidFlash: HTMLElement;
+  private readonly newBestFlash: HTMLElement;
   private readonly cameraMode: HTMLElement;
   private readonly cockpitTft: HTMLElement;
   private readonly cockpitSpeed: HTMLElement;
@@ -63,6 +70,7 @@ export class Hud {
 
   private lastDraw = 0;
   private flashUntil = 0;
+  private bestFlashUntil = 0;
   private bestMs: number | null;
 
   constructor(host: HTMLElement, track: TrackData, bestMs: number | null) {
@@ -97,6 +105,22 @@ export class Hud {
     this.currentTime = row('TIME');
     this.lastTime = row('LAST');
     this.bestTime = row('BEST');
+    this.sessionBestTime = row('SESSION');
+    this.lapNumber = row('LAP');
+    this.lapHistory = el(
+      'div',
+      {
+        marginTop: '8px',
+        paddingTop: '7px',
+        borderTop: '1px solid rgba(255,255,255,.22)',
+        color: 'rgba(255,255,255,.72)',
+        fontSize: '12px',
+        fontVariantNumeric: 'tabular-nums',
+        lineHeight: '1.45',
+        whiteSpace: 'pre',
+      },
+      laps,
+    );
 
     // --- minimap (top right) ----------------------------------------------------
     const MAP = 190;
@@ -327,6 +351,28 @@ export class Hud {
     );
     this.invalidFlash.textContent = 'LAP INVALID';
 
+    this.newBestFlash = el(
+      'div',
+      {
+        position: 'absolute',
+        top: '31%',
+        left: '50%',
+        transform: 'translate(-50%,-50%) scale(.96)',
+        padding: '12px 20px',
+        border: '1px solid rgba(91,255,151,.7)',
+        borderRadius: '8px',
+        background: 'rgba(4,35,20,.75)',
+        color: '#5bff97',
+        fontSize: '27px',
+        fontWeight: '900',
+        letterSpacing: '2px',
+        opacity: '0',
+        transition: 'opacity .2s, transform .25s',
+      },
+      this.root,
+    );
+    this.newBestFlash.textContent = 'NEW PERSONAL BEST';
+
     this.cameraMode = el(
       'div',
       {
@@ -354,6 +400,10 @@ export class Hud {
     this.flashUntil = nowMs + 1600;
   }
 
+  flashNewBest(nowMs: number): void {
+    this.bestFlashUntil = nowMs + 2400;
+  }
+
   /** Called every rendered frame; redraws at ~15 Hz. */
   update(snap: HudSnapshot, nowMs: number): void {
     if (nowMs - this.lastDraw < UPDATE_INTERVAL_MS) return;
@@ -374,6 +424,15 @@ export class Hud {
     this.currentTime.style.color = snap.lapValid ? '#fff' : '#ff5252';
     this.lastTime.textContent = fmtTime(snap.lastLapMs);
     this.bestTime.textContent = fmtTime(snap.bestMs);
+    this.sessionBestTime.textContent = fmtTime(snap.sessionBestMs);
+    this.lapNumber.textContent = snap.lapNumber > 0 ? String(snap.lapNumber) : '--';
+    this.lapHistory.textContent = snap.lapHistoryMs.length
+      ? snap.lapHistoryMs
+          .slice(-4)
+          .reverse()
+          .map((ms) => `•  ${fmtTime(ms)}`)
+          .join('\n')
+      : 'NO COMPLETED LAPS';
     this.cameraMode.textContent = snap.cameraMode;
     this.cockpitTft.style.display = snap.cameraMode === 'RIDER VIEW' ? 'block' : 'none';
     this.cockpitSpeed.textContent = String(Math.round(Math.max(0, snap.speedKph)));
@@ -383,6 +442,9 @@ export class Hud {
       snap.rpm01 > 0.92 ? '#ff2a34' : snap.rpm01 > 0.75 ? '#ffb000' : '#f4f7fb';
 
     this.invalidFlash.style.opacity = nowMs < this.flashUntil ? '1' : '0';
+    const showBest = nowMs < this.bestFlashUntil;
+    this.newBestFlash.style.opacity = showBest ? '1' : '0';
+    this.newBestFlash.style.transform = `translate(-50%,-50%) scale(${showBest ? '1' : '.96'})`;
 
     this.drawMinimap(snap.bikePos);
   }

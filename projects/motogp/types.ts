@@ -21,6 +21,8 @@ export interface Telemetry {
   gear: number;
   leanDeg: number; // positive = leaning right
   wheelContacts: boolean[];
+  crashed: boolean;
+  impactSeverity: number;
 }
 
 /** Dense centerline sample written by the Blender track builder. */

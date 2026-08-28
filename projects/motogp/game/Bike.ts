@@ -6,6 +6,7 @@ import { LAYER_MOVING } from '../core/jolt';
 import {
   AERO,
   CHASSIS,
+  CRASH,
   DIFFERENTIAL,
   ENGINE,
   LEAN,
@@ -15,6 +16,8 @@ import {
   WHEELS,
 } from '../config';
 import type { InputIntent, Telemetry } from '../types';
+import { AutomaticGearbox } from './AutomaticGearbox';
+import { CrashDetector, type CrashEvent } from './CrashDetector';
 
 type BodyID = InstanceType<JoltModule['BodyID']>;
 type Body = InstanceType<JoltModule['Body']>;
@@ -47,6 +50,8 @@ export class Bike {
     gear: 1,
     leanDeg: 0,
     wheelContacts: [false, false],
+    crashed: false,
+    impactSeverity: 0,
   };
 
   private world: PhysicsWorld;
@@ -63,6 +68,38 @@ export class Bike {
   private riderVisual: THREE.Object3D | null = null;
   private riderCockpitHands: THREE.Object3D | null = null;
   private riderVisible = true;
+  private readonly crashDetector = new CrashDetector();
+  private vehicleConstraintAttached = true;
+  private riderCrashBodyId: BodyID | null = null;
+  private riderHomeParent: THREE.Object3D | null = null;
+  private riderHomePosition = new THREE.Vector3();
+  private riderHomeQuaternion = new THREE.Quaternion();
+  private riderHomeScale = new THREE.Vector3(1, 1, 1);
+  private readonly riderCrashRelative = new THREE.Matrix4();
+  private readonly crashBodyMatrix = new THREE.Matrix4();
+  private readonly crashWorldMatrix = new THREE.Matrix4();
+  private readonly crashParentInverse = new THREE.Matrix4();
+  private readonly crashCenter = new THREE.Vector3();
+  private readonly crashRotation = new THREE.Quaternion();
+  private readonly crashScale = new THREE.Vector3(1, 1, 1);
+  private previousVelocity = new THREE.Vector3();
+  private hasPreviousVelocity = false;
+  private readonly posePreviousPosition = new THREE.Vector3();
+  private readonly poseCurrentPosition = new THREE.Vector3();
+  private readonly posePreviousQuaternion = new THREE.Quaternion();
+  private readonly poseCurrentQuaternion = new THREE.Quaternion();
+  private hasPhysicsPose = false;
+  private readonly gearbox = new AutomaticGearbox({
+    gearRatios: TRANSMISSION.gearRatios,
+    differentialRatio: DIFFERENTIAL.ratio,
+    wheelRadiusM: WHEELS.radius,
+    maxRpm: ENGINE.maxRpm,
+    shiftUpRpm: TRANSMISSION.shiftUpRpm,
+    shiftDownRpm: TRANSMISSION.shiftDownRpm,
+    kickdownRpm: TRANSMISSION.kickdownRpm,
+    shiftDurationSec: TRANSMISSION.shiftDurationSec,
+    shiftLockoutSec: TRANSMISSION.shiftLockoutSec,
+  });
 
   constructor(world: PhysicsWorld, spawn: { x: number; y: number; z: number }, yawRad = 0) {
     this.world = world;
@@ -106,6 +143,7 @@ export class Bike {
     world.physicsSystem.AddConstraint(this.constraint);
     this.addStepListener();
     this.controller = Jolt.castObject(this.constraint.GetController(), Jolt.MotorcycleController);
+    this.applyGearboxReset();
 
     this.buildPlaceholderVisuals();
     this.ready = this.loadModel();
@@ -132,6 +170,12 @@ export class Bike {
       mount.add(gltf.scene);
       this.riderVisual = gltf.scene.getObjectByName('Marc93_Rider_Baked_Final') ?? null;
       this.riderCockpitHands = gltf.scene.getObjectByName('Marc93_Rider_Hands_Cockpit') ?? null;
+      if (this.riderVisual) {
+        this.riderHomeParent = this.riderVisual.parent;
+        this.riderHomePosition.copy(this.riderVisual.position);
+        this.riderHomeQuaternion.copy(this.riderVisual.quaternion);
+        this.riderHomeScale.copy(this.riderVisual.scale);
+      }
       if (this.riderVisual) this.riderVisual.visible = this.riderVisible;
       if (this.riderCockpitHands) this.riderCockpitHands.visible = !this.riderVisible;
 
@@ -146,8 +190,8 @@ export class Bike {
   /** Rider view swaps the body shell for the baked gloves gripping the clip-ons. */
   setRiderVisible(visible: boolean): void {
     this.riderVisible = visible;
-    if (this.riderVisual) this.riderVisual.visible = visible;
-    if (this.riderCockpitHands) this.riderCockpitHands.visible = !visible;
+    if (this.riderVisual) this.riderVisual.visible = this.telemetry.crashed || visible;
+    if (this.riderCockpitHands) this.riderCockpitHands.visible = !this.telemetry.crashed && !visible;
   }
 
   /**
@@ -208,7 +252,10 @@ export class Bike {
     for (const [x, y] of ENGINE.normalizedTorqueCurve) {
       cs.mEngine.mNormalizedTorque.AddPoint(x, y);
     }
-    cs.mTransmission.mMode = Jolt.ETransmissionMode_Auto;
+    // The generic Jolt automatic selects neutral when drive input is released.
+    // A race bike instead holds its road gear, so selection is managed by the
+    // deterministic AutomaticGearbox and applied through Jolt's manual mode.
+    cs.mTransmission.mMode = Jolt.ETransmissionMode_Manual;
     for (const r of TRANSMISSION.gearRatios) cs.mTransmission.mGearRatios.push_back(r);
     cs.mTransmission.mShiftUpRPM = TRANSMISSION.shiftUpRpm;
     cs.mTransmission.mShiftDownRPM = TRANSMISSION.shiftDownRpm;
@@ -248,21 +295,34 @@ export class Bike {
    */
   rebuild(): void {
     const { Jolt, physicsSystem, bodyInterface } = this.world;
-    if (this.stepListener) physicsSystem.RemoveStepListener(this.stepListener);
-    physicsSystem.RemoveConstraint(this.constraint);
+    this.restoreRiderAfterCrash();
+    if (this.stepListener && this.vehicleConstraintAttached) physicsSystem.RemoveStepListener(this.stepListener);
+    if (this.vehicleConstraintAttached) physicsSystem.RemoveConstraint(this.constraint);
     // The old constraint is intentionally NOT destroyed — same binding rule as
     // creation chains (jolt.ts). Dev-only path; the leak is bounded by presses.
     bodyInterface.ActivateBody(this.bodyId);
     this.constraint = this.buildConstraint(this.body);
     physicsSystem.AddConstraint(this.constraint);
     this.addStepListener();
+    this.vehicleConstraintAttached = true;
     this.controller = Jolt.castObject(this.constraint.GetController(), Jolt.MotorcycleController);
+    this.telemetry.crashed = false;
+    this.telemetry.impactSeverity = 0;
+    this.crashDetector.reset();
+    this.applyGearboxReset();
   }
 
   /** Called once per fixed step, BEFORE world.step(). */
-  prePhysicsUpdate(_dt: number, intent: InputIntent): void {
+  prePhysicsUpdate(dt: number, intent: InputIntent): void {
     const { bodyInterface, scratch } = this.world;
     const { vec3 } = scratch;
+
+    if (this.telemetry.crashed) {
+      // Once the vehicle constraint is detached, the chassis and rider are
+      // ordinary continuous rigid bodies. No steering, lean spring, brake, or
+      // anti-wheelie force should interfere with the physical crash.
+      return;
+    }
 
     // Keyboard/gamepad input is shaped and progressively capped with speed.
     // Jolt then applies its physics-derived speed/lean steering limit as a
@@ -281,6 +341,13 @@ export class Bike {
     // braking at rest must never command negative drive torque.
     let forward = intent.throttle;
     let brake = intent.brake;
+
+    const shift = this.gearbox.update(dt, Math.abs(this.forwardSpeed), forward);
+    this.controller.GetTransmission().Set(
+      shift.gear,
+      shift.clutch * TRANSMISSION.clutchStrength,
+    );
+    forward *= shift.driveScale;
 
     // As in Jolt's official motorcycle sample, reduce braking while leaned so
     // a cornering brake tap does not instantly spin the bike around.
@@ -339,32 +406,88 @@ export class Bike {
   }
 
   /** Called once per fixed step, AFTER world.step(). Snapshots telemetry. */
-  postPhysicsUpdate(): void {
+  postPhysicsUpdate(dt: number): CrashEvent | null {
     const { bodyInterface, scratch } = this.world;
     const { quat, rvec3 } = scratch;
 
     const vel = bodyInterface.GetLinearVelocity(this.bodyId); // allocating getter
+    const vx = vel.GetX();
+    const vy = vel.GetY();
+    const vz = vel.GetZ();
     this.getForwardInto(this.fwdTmp);
     this.forwardSpeed =
-      vel.GetX() * this.fwdTmp.x + vel.GetY() * this.fwdTmp.y + vel.GetZ() * this.fwdTmp.z;
-    this.telemetry.speedKph = vel.Length() * 3.6;
+      vx * this.fwdTmp.x + vy * this.fwdTmp.y + vz * this.fwdTmp.z;
+    // Horizontal ground speed excludes suspension bounce, kerb launches, and
+    // sinking/recovery motion that used to make the speedometer jump.
+    this.telemetry.speedKph = Math.hypot(vx, vz) * 3.6;
+    const deltaVelocity = this.hasPreviousVelocity
+      ? Math.hypot(vx - this.previousVelocity.x, vy - this.previousVelocity.y, vz - this.previousVelocity.z)
+      : 0;
+    this.previousVelocity.set(vx, vy, vz);
+    this.hasPreviousVelocity = true;
     this.Jolt.destroy(vel);
 
     bodyInterface.GetPositionAndRotation(this.bodyId, rvec3, quat);
+    if (this.hasPhysicsPose) {
+      this.posePreviousPosition.copy(this.poseCurrentPosition);
+      this.posePreviousQuaternion.copy(this.poseCurrentQuaternion);
+    }
+    this.poseCurrentPosition.set(rvec3.GetX(), rvec3.GetY(), rvec3.GetZ());
+    this.poseCurrentQuaternion.set(quat.GetX(), quat.GetY(), quat.GetZ(), quat.GetW());
+    if (!this.hasPhysicsPose) {
+      this.posePreviousPosition.copy(this.poseCurrentPosition);
+      this.posePreviousQuaternion.copy(this.poseCurrentQuaternion);
+      this.hasPhysicsPose = true;
+    }
     this.telemetry.leanDeg = computeLean(quat);
     this.telemetry.rpm = this.controller.GetEngine().GetCurrentRPM();
-    this.telemetry.gear = this.controller.GetTransmission().GetCurrentGear();
+    this.telemetry.gear = this.gearbox.gear;
     this.telemetry.wheelContacts[0] = this.constraint.GetWheel(0).HasContact();
     this.telemetry.wheelContacts[1] = this.constraint.GetWheel(1).HasContact();
+
+    if (this.telemetry.crashed) return null;
+    const qx = quat.GetX(), qz = quat.GetZ();
+    const uprightDot = 1 - 2 * (qx * qx + qz * qz);
+    // Body::GetAngularVelocity is a borrowed accessor; never destroy it.
+    const angular = this.body.GetAngularVelocity();
+    const angularSpeed = Math.hypot(angular.GetX(), angular.GetY(), angular.GetZ());
+    const crash = this.crashDetector.update({
+      speedMps: this.telemetry.speedKph / 3.6,
+      deltaVelocityMps: deltaVelocity,
+      uprightDot,
+      angularSpeedRad: angularSpeed,
+      frontContact: this.telemetry.wheelContacts[0]!,
+      rearContact: this.telemetry.wheelContacts[1]!,
+    });
+    if (!crash) {
+      this.telemetry.impactSeverity = Math.max(0, this.telemetry.impactSeverity - dt * 2);
+      return null;
+    }
+    this.beginCrash(crash.severity);
+    return crash;
   }
 
   /** Copy body transform onto the visual group; place/spin/steer the wheel meshes. */
-  syncVisuals(): void {
-    const { bodyInterface, scratch } = this.world;
-    const { rvec3, quat } = scratch;
-    bodyInterface.GetPositionAndRotation(this.bodyId, rvec3, quat);
-    this.root.position.set(rvec3.GetX(), rvec3.GetY(), rvec3.GetZ());
-    this.root.quaternion.set(quat.GetX(), quat.GetY(), quat.GetZ(), quat.GetW());
+  syncVisuals(interpolationAlpha = 1): void {
+    if (this.hasPhysicsPose) {
+      const alpha = THREE.MathUtils.clamp(interpolationAlpha, 0, 1);
+      this.root.position.lerpVectors(this.posePreviousPosition, this.poseCurrentPosition, alpha);
+      this.root.quaternion.slerpQuaternions(
+        this.posePreviousQuaternion,
+        this.poseCurrentQuaternion,
+        alpha,
+      );
+    } else {
+      const { bodyInterface, scratch } = this.world;
+      bodyInterface.GetPositionAndRotation(this.bodyId, scratch.rvec3, scratch.quat);
+      this.root.position.set(scratch.rvec3.GetX(), scratch.rvec3.GetY(), scratch.rvec3.GetZ());
+      this.root.quaternion.set(
+        scratch.quat.GetX(),
+        scratch.quat.GetY(),
+        scratch.quat.GetZ(),
+        scratch.quat.GetW(),
+      );
+    }
 
     for (const [i, mesh] of this.wheelMeshes.entries()) {
       const wheel = this.constraint.GetWheel(i);
@@ -386,11 +509,15 @@ export class Bike {
         'YXZ', // spin about X applied in the steered frame
       );
     }
+
+    this.syncCrashedRider();
   }
 
   /** Upright reset at a sampled road point, heading yawRad, zero velocity. */
   respawnAt(x: number, roadY: number, z: number, yawRad: number): void {
     const { Jolt, bodyInterface } = this.world;
+    this.restoreRiderAfterCrash();
+    this.attachVehicleConstraint();
     const pos = new Jolt.RVec3(x, roadY + SPAWN_Y, z);
     // sRotation returns a shared-slot alias — consume inline, never destroy.
     const yawQ = Jolt.Quat.prototype.sRotation(new Jolt.Vec3(0, 1, 0), yawRad);
@@ -400,6 +527,40 @@ export class Bike {
     Jolt.destroy(pos);
     Jolt.destroy(zero);
     this.steerCurrent = 0;
+    this.telemetry.crashed = false;
+    this.telemetry.impactSeverity = 0;
+    this.crashDetector.reset();
+    this.hasPreviousVelocity = false;
+    this.hasPhysicsPose = false;
+    this.applyGearboxReset();
+  }
+
+  /** World-space rider position for the cinematic crash camera. */
+  getCrashRiderPositionInto(target: THREE.Vector3): boolean {
+    if (!this.riderCrashBodyId) return false;
+    this.world.bodyInterface.GetPositionAndRotation(
+      this.riderCrashBodyId,
+      this.world.scratch.rvec3,
+      this.world.scratch.quat,
+    );
+    target.set(
+      this.world.scratch.rvec3.GetX(),
+      this.world.scratch.rvec3.GetY(),
+      this.world.scratch.rvec3.GetZ(),
+    );
+    return true;
+  }
+
+  /** Reset always returns to first gear; a running motorcycle never auto-selects neutral. */
+  private applyGearboxReset(): void {
+    const command = this.gearbox.reset();
+    this.controller.GetTransmission().Set(
+      command.gear,
+      command.clutch * TRANSMISSION.clutchStrength,
+    );
+    this.controller.GetEngine().SetCurrentRPM(ENGINE.minRpm);
+    this.telemetry.gear = command.gear;
+    this.telemetry.rpm = ENGINE.minRpm;
   }
 
   /**
@@ -440,9 +601,107 @@ export class Bike {
 
   dispose(): void {
     const { physicsSystem } = this.world;
-    if (this.stepListener) physicsSystem.RemoveStepListener(this.stepListener);
-    physicsSystem.RemoveConstraint(this.constraint);
+    this.restoreRiderAfterCrash();
+    if (this.stepListener && this.vehicleConstraintAttached) physicsSystem.RemoveStepListener(this.stepListener);
+    if (this.vehicleConstraintAttached) physicsSystem.RemoveConstraint(this.constraint);
     this.world.destroyBody(this.bodyId);
+  }
+
+  private beginCrash(severity: number): void {
+    this.telemetry.crashed = true;
+    this.telemetry.impactSeverity = severity;
+    this.detachVehicleConstraint();
+    if (!this.riderVisual || !this.root.parent) return;
+
+    this.root.updateMatrixWorld(true);
+    const visualWorld = this.riderVisual.matrixWorld.clone();
+    const bounds = new THREE.Box3().setFromObject(this.riderVisual);
+    const center = bounds.getCenter(this.crashCenter);
+    const rotation = this.riderVisual.getWorldQuaternion(this.crashRotation);
+
+    this.root.parent.attach(this.riderVisual);
+    this.riderVisual.visible = true;
+    if (this.riderCockpitHands) this.riderCockpitHands.visible = false;
+
+    this.crashBodyMatrix.compose(center, rotation, this.crashScale);
+    this.riderCrashRelative.copy(this.crashBodyMatrix).invert().multiply(visualWorld);
+
+    const bikeVelocity = this.world.bodyInterface.GetLinearVelocity(this.bodyId);
+    const bikeAngular = this.body.GetAngularVelocity();
+    this.getForwardInto(this.fwdTmp);
+    this.riderCrashBodyId = this.world.addDynamicCapsule(
+      CRASH.riderCapsuleHalfHeight,
+      CRASH.riderCapsuleRadius,
+      center,
+      rotation,
+      CRASH.riderMassKg,
+      {
+        friction: CRASH.riderFriction,
+        restitution: CRASH.riderRestitution,
+        linearVelocity: {
+          x: bikeVelocity.GetX() + this.fwdTmp.z * severity * 1.6,
+          y: bikeVelocity.GetY() + 1.2 + severity * 1.8,
+          z: bikeVelocity.GetZ() - this.fwdTmp.x * severity * 1.6,
+        },
+        angularVelocity: {
+          x: bikeAngular.GetX() + 2.5 + severity * 3.5,
+          y: bikeAngular.GetY() + 1.2 * severity,
+          z: bikeAngular.GetZ() + 2 + severity * 2.5,
+        },
+      },
+    );
+    this.Jolt.destroy(bikeVelocity);
+  }
+
+  private syncCrashedRider(): void {
+    if (!this.riderCrashBodyId || !this.riderVisual?.parent) return;
+    const { bodyInterface, scratch } = this.world;
+    bodyInterface.GetPositionAndRotation(this.riderCrashBodyId, scratch.rvec3, scratch.quat);
+    this.crashCenter.set(scratch.rvec3.GetX(), scratch.rvec3.GetY(), scratch.rvec3.GetZ());
+    this.crashRotation.set(
+      scratch.quat.GetX(),
+      scratch.quat.GetY(),
+      scratch.quat.GetZ(),
+      scratch.quat.GetW(),
+    );
+    this.crashBodyMatrix.compose(this.crashCenter, this.crashRotation, this.crashScale);
+    this.crashWorldMatrix.copy(this.crashBodyMatrix).multiply(this.riderCrashRelative);
+    this.crashParentInverse.copy(this.riderVisual.parent.matrixWorld).invert();
+    this.crashWorldMatrix.premultiply(this.crashParentInverse);
+    this.crashWorldMatrix.decompose(
+      this.riderVisual.position,
+      this.riderVisual.quaternion,
+      this.riderVisual.scale,
+    );
+  }
+
+  private restoreRiderAfterCrash(): void {
+    if (this.riderCrashBodyId) {
+      this.world.destroyBody(this.riderCrashBodyId);
+      this.riderCrashBodyId = null;
+    }
+    if (this.riderVisual && this.riderHomeParent) {
+      this.riderHomeParent.add(this.riderVisual);
+      this.riderVisual.position.copy(this.riderHomePosition);
+      this.riderVisual.quaternion.copy(this.riderHomeQuaternion);
+      this.riderVisual.scale.copy(this.riderHomeScale);
+      this.riderVisual.visible = this.riderVisible;
+    }
+    if (this.riderCockpitHands) this.riderCockpitHands.visible = !this.riderVisible;
+  }
+
+  private detachVehicleConstraint(): void {
+    if (!this.vehicleConstraintAttached) return;
+    if (this.stepListener) this.world.physicsSystem.RemoveStepListener(this.stepListener);
+    this.world.physicsSystem.RemoveConstraint(this.constraint);
+    this.vehicleConstraintAttached = false;
+  }
+
+  private attachVehicleConstraint(): void {
+    if (this.vehicleConstraintAttached) return;
+    this.world.physicsSystem.AddConstraint(this.constraint);
+    if (this.stepListener) this.world.physicsSystem.AddStepListener(this.stepListener);
+    this.vehicleConstraintAttached = true;
   }
 
   /** Low-poly fallback shown only if the authored Ducati GLB fails to load. */

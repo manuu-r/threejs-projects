@@ -22,6 +22,7 @@ import { LapTimer } from './timing/LapTimer';
 import { BestLapStore } from './timing/BestLapStore';
 import { ENGINE, PHYSICS } from './config';
 import { EngineSound } from './audio/EngineSound';
+import { CinematicSlowMotion } from './game/CinematicSlowMotion';
 
 /**
  * Bootstrap: loading screen -> physics init -> circuit build -> game loop.
@@ -39,8 +40,10 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
   const AUTO = params.has('autodrive');
   /** `?autodrive&steertest`: straight, then hold full-right — verifies turn handedness. */
   const STEER_TEST = params.has('steertest');
+  /** `?autodrive&speedtest`: straight-line acceleration then closed-throttle coast. */
+  const SPEED_TEST = params.has('speedtest');
   const AUTO_STEPS_PER_FRAME = 200; // 3.33 s of sim per frame
-  const AUTO_SIM_LIMIT_SEC = STEER_TEST ? 8 : 420;
+  const AUTO_SIM_LIMIT_SEC = SPEED_TEST ? 24 : STEER_TEST ? 8 : 420;
 
   container.replaceChildren();
   const loading = new LoadingScreen(container);
@@ -60,6 +63,7 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
 
   const controls = new Controls();
   const engineSound = new EngineSound();
+  const slowMotion = new CinematicSlowMotion();
   const spawn = track.spawnPose();
   // Resolve the grid anchor vertically against the authored surface. The GLB
   // contains stacked terrain and tarmac, so the centerline elevation is needed
@@ -87,13 +91,19 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
   const intent = controls.intent;
 
   let paused = false;
+  /** Scaled physics time; deliberately separate from the race clock below. */
   let simTimeSec = 0;
+  /** Unscaled fixed-step time keeps lap timing correct during crash slow motion. */
+  let raceTimeSec = 0;
+  let pendingCrashRecovery = false;
   let lastDriveAngle = 0; // autodrive steering angle, for the progress log
   let lapWasValid = true; // for transition-only invalid logging
   let stuckSec = 0; // autodrive: low-speed timer triggering recovery
   let steerLogNext = 0; // steertest: next simTime to log heading
   const bikePos = new THREE.Vector3();
   const bikeFwd = new THREE.Vector3();
+  const bikeUp = new THREE.Vector3(0, 1, 0);
+  const crashRiderPos = new THREE.Vector3();
   let lastSafeRoad = { x: spawnRoad.x, y: spawnRoad.y, z: spawnRoad.z, yaw: spawn.yaw };
   const safeRoadHistory = [lastSafeRoad];
   let nextSafePoseSampleSec = 0;
@@ -114,15 +124,28 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
     }
   }
 
-  function fixedStep(dt: number): void {
+  function fixedStep(dt: number, raceDt = dt): void {
     if (paused) return;
+    if (pendingCrashRecovery) {
+      pendingCrashRecovery = false;
+      doRespawn(false);
+      return;
+    }
     simTimeSec += dt;
+    raceTimeSec += raceDt;
 
-    controls.update(dt);
+    // Input response stays tied to real time even while crash physics is slowed.
+    controls.update(raceDt);
     if (AUTO) autodrive();
     bike.prePhysicsUpdate(dt, intent);
     world.step(dt);
-    bike.postPhysicsUpdate();
+    const crash = bike.postPhysicsUpdate(dt);
+    if (crash) {
+      slowMotion.trigger(crash.severity);
+      checkpoints.invalidate();
+      if (lapTimer.running) lapTimer.invalidateCurrent();
+      controls.reset();
+    }
     // Read directly from Jolt. Visual root transforms update only once per
     // rendered frame and were too stale to protect a fast-moving bike.
     const uprightDot = bike.getPhysicsPoseInto(bikePos, bikeFwd);
@@ -149,10 +172,12 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
       nextSafePoseSampleSec = simTimeSec + 0.25;
     }
 
-    const ev = checkpoints.update(bikePos.x, bikePos.z);
+    const ev = bike.telemetry.crashed
+      ? { passed: false, lapStarted: false, lapCompleted: false }
+      : checkpoints.update(bikePos.x, bikePos.z);
     if (ev.lapStarted) {
-      lapTimer.start(simTimeSec);
-      if (AUTO) console.log(`[lap] started @${simTimeSec.toFixed(2)}s`);
+      lapTimer.start(raceTimeSec);
+      if (AUTO) console.log(`[lap] started @${raceTimeSec.toFixed(2)}s`);
     }
     if (!checkpoints.valid && lapTimer.running) {
       lapTimer.invalidateCurrent();
@@ -160,18 +185,20 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
     }
     lapWasValid = checkpoints.valid;
     if (ev.lapCompleted) {
-      const ms = lapTimer.completeLap(simTimeSec);
-      if (AUTO) console.log(`[lap] completed ${ms}ms @${simTimeSec.toFixed(2)}s`);
+      const ms = lapTimer.completeLap(raceTimeSec);
+      if (AUTO) console.log(`[lap] completed ${ms}ms @${raceTimeSec.toFixed(2)}s`);
+      if (ms !== null) bestLapStore.appendHistory(ms);
       if (ms !== null && (bestMs === null || ms < bestMs)) {
         bestMs = ms;
         bestLapStore.save(ms);
+        hud.flashNewBest(performance.now());
         if (AUTO) console.log(`[lap] best saved ${ms}ms (localStorage: ${bestLapStore.load()})`);
       }
     }
 
     // Auto-respawn watchdog.
     let needsRespawn = false;
-    if (!STEER_TEST) needsRespawn = respawnMonitor.update(dt, simTimeSec, {
+    if (!STEER_TEST && !bike.telemetry.crashed) needsRespawn = respawnMonitor.update(dt, simTimeSec, {
       uprightDot,
       surfaceDistance: surface.horizontalDistance,
       heightAboveSurface,
@@ -206,9 +233,12 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
           gear: bike.telemetry.gear,
           rpm01: bike.telemetry.rpm / ENGINE.maxRpm,
           leanDeg: bike.telemetry.leanDeg,
-          currentMs: lapTimer.currentMs(simTimeSec),
+          currentMs: lapTimer.currentMs(raceTimeSec),
           lastLapMs: lapTimer.lastLapMs,
           bestMs,
+          sessionBestMs: lapTimer.sessionBestMs,
+          lapNumber: lapTimer.lapNumber,
+          lapHistoryMs: lapTimer.historyMs,
           lapValid: checkpoints.valid,
           cameraMode: chase.modeLabel,
           bikePos,
@@ -224,6 +254,23 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
 
   /** Pure-pursuit + curvature speed plan along the centerline (verification only). */
   function autodrive(): void {
+    if (SPEED_TEST) {
+      // The grid straight is long enough to demonstrate an upshift, followed
+      // by a meaningful in-gear coast before its braking zone.
+      intent.throttle = simTimeSec < 9.5 ? 1 : 0;
+      intent.brake = 0;
+      intent.steer = 0;
+      if (simTimeSec >= steerLogNext) {
+        steerLogNext += 0.25;
+        console.log(
+          `[speed] t=${simTimeSec.toFixed(2)} ` +
+          `v=${bike.telemetry.speedKph.toFixed(1)} gear=${bike.telemetry.gear} ` +
+          `rpm=${bike.telemetry.rpm.toFixed(0)} throttle=${intent.throttle.toFixed(0)}`,
+        );
+      }
+      return;
+    }
+
     // Handedness probe: cruise straight, then hold full-right steering. This
     // model/controller pairing produces decreasing mathematical yaw for the
     // player-visible right turn; the live camera view is authoritative.
@@ -266,8 +313,11 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
     const ahead = Math.max(3, Math.round((6 + speed * 0.9) / track.spacing));
     const target = track.samples[(i + ahead) % track.count]!;
     bike.getForwardInto(bikeFwd);
-    const dx = target.p[0] - bike.root.position.x;
-    const dz = target.p[2] - bike.root.position.z;
+    // Fixed-step verification must use the latest physics pose. The rendered
+    // root only updates once after a 200-step batch and made autopilot steer
+    // toward a stale position, masking drivetrain behavior with recoveries.
+    const dx = target.p[0] - bikePos.x;
+    const dz = target.p[2] - bikePos.z;
     const len = Math.hypot(dx, dz) || 1;
     const nx = dx / len;
     const nz = dz / len;
@@ -298,23 +348,43 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
       lastSafeRoad.yaw,
     );
     bikePos.set(lastSafeRoad.x, lastSafeRoad.y, lastSafeRoad.z);
+    slowMotion.reset();
+    clock.timeScale = 1;
     if (manual) respawnMonitor.notifyManual(simTimeSec);
     checkpoints.invalidate(); // respawns never count toward the current lap
     if (lapTimer.running) lapTimer.invalidateCurrent();
   }
 
   clock.onFrame = (frameDt) => {
-    bike.syncVisuals();
+    const cinematic = slowMotion.update(frameDt);
+    clock.timeScale = cinematic.timeScale;
+    if (cinematic.recover) pendingCrashRecovery = true;
+    bike.syncVisuals(clock.interpolationAlpha);
     bikePos.copy(bike.root.position);
-    bike.getForwardInto(bikeFwd);
+    bikeFwd.set(0, 0, 1).applyQuaternion(bike.root.quaternion).normalize();
+    bikeUp.set(0, 1, 0).applyQuaternion(bike.root.quaternion).normalize();
 
     // Autopilot runs skip rendering — headless verification only needs the HUD DOM.
     if (!AUTO) {
-      chase.update(frameDt, bikePos, bikeFwd, bike.telemetry.leanDeg, bike.telemetry.speedKph / 3.6);
+      if (bike.telemetry.crashed && bike.getCrashRiderPositionInto(crashRiderPos)) {
+        chase.updateCrash(frameDt, bikePos, bikeFwd, crashRiderPos, bike.telemetry.impactSeverity);
+      } else {
+        chase.update(
+          frameDt,
+          bikePos,
+          bikeFwd,
+          bike.telemetry.leanDeg,
+          bike.telemetry.speedKph / 3.6,
+          bikeUp,
+        );
+      }
       renderer3d.trackSunOn({ x: bikePos.x, y: bikePos.y, z: bikePos.z });
       renderer3d.render();
     }
-    engineSound.update(bike.telemetry.rpm / ENGINE.maxRpm, intent.throttle);
+    engineSound.update(
+      bike.telemetry.rpm / ENGINE.maxRpm,
+      bike.telemetry.crashed ? 0 : intent.throttle,
+    );
 
     hud.update(
       {
@@ -322,9 +392,12 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
         gear: bike.telemetry.gear,
         rpm01: bike.telemetry.rpm / ENGINE.maxRpm,
         leanDeg: bike.telemetry.leanDeg,
-        currentMs: lapTimer.currentMs(simTimeSec),
+        currentMs: lapTimer.currentMs(raceTimeSec),
         lastLapMs: lapTimer.lastLapMs,
         bestMs,
+        sessionBestMs: lapTimer.sessionBestMs,
+        lapNumber: lapTimer.lapNumber,
+        lapHistoryMs: lapTimer.historyMs,
         lapValid: checkpoints.valid,
         cameraMode: chase.modeLabel,
         bikePos,
