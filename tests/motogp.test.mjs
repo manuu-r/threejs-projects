@@ -375,6 +375,11 @@ test("HUD presents crash feedback and complete lap timing fields", async () => {
   for (const label of ["CURRENT", "LAST LAP", "BEST", "SESSION"]) {
     assert.match(hudSource, new RegExp(`row\\('${label}'\\)`));
   }
+  assert.match(hudSource, /const MAP_SIZE = 228/);
+  assert.match(hudSource, /NÜRBURGRING GP/);
+  assert.match(hudSource, /bikeFwd: THREE\.Vector3/);
+  assert.match(hudSource, /Math\.atan2\(bikeFwd\.z, bikeFwd\.x\)/);
+  assert.match(hudSource, /Compact chequered start\/finish marker/);
 });
 
 test("keeps one shared WebGL runtime through React development remounts", async () => {

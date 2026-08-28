@@ -320,6 +320,7 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
           impactSeverity: bike.telemetry.impactSeverity,
           cameraMode: chase.modeLabel,
           bikePos,
+          bikeFwd,
         },
         performance.now(),
       );
@@ -501,6 +502,7 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
         impactSeverity: bike.telemetry.impactSeverity,
         cameraMode: chase.modeLabel,
         bikePos,
+        bikeFwd,
       },
       performance.now(),
     );

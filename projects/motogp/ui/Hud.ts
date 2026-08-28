@@ -20,9 +20,11 @@ export interface HudSnapshot {
   impactSeverity: number;
   cameraMode: string;
   bikePos: THREE.Vector3;
+  bikeFwd: THREE.Vector3;
 }
 
 const UPDATE_INTERVAL_MS = 66; // ~15 Hz
+const MAP_SIZE = 228;
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -127,15 +129,51 @@ export class Hud {
       laps,
     );
 
-    // --- minimap (top right) ----------------------------------------------------
-    const MAP = 190;
-    const mapCanvas = el(
-      'canvas',
-      { position: 'absolute', top: '14px', right: '16px' },
+    // --- circuit map (top right) -----------------------------------------------
+    const mapPanel = el(
+      'div',
+      {
+        position: 'absolute',
+        top: '56px',
+        right: '16px',
+        width: `${MAP_SIZE + 20}px`,
+        padding: '8px 9px 9px',
+        boxSizing: 'border-box',
+        border: '1px solid rgba(255,255,255,.2)',
+        borderRadius: '12px',
+        background: 'linear-gradient(145deg,rgba(6,10,16,.76),rgba(12,18,27,.48))',
+        boxShadow: '0 10px 30px rgba(0,0,0,.24), inset 0 0 0 1px rgba(255,255,255,.035)',
+        backdropFilter: 'blur(7px)',
+      },
       this.root,
     );
-    mapCanvas.width = MAP;
-    mapCanvas.height = MAP;
+    mapPanel.className = 'motogp-minimap';
+    const mapHeader = el(
+      'div',
+      {
+        height: '20px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 3px',
+        color: 'rgba(255,255,255,.72)',
+        fontSize: '8px',
+        fontWeight: '800',
+        letterSpacing: '1.2px',
+        textShadow: '0 1px 2px rgba(0,0,0,.8)',
+      },
+      mapPanel,
+    );
+    el('span', {}, mapHeader).textContent = 'NÜRBURGRING GP';
+    const live = el('span', { color: '#ff4a5f' }, mapHeader);
+    live.textContent = '● LIVE';
+    const mapCanvas = el(
+      'canvas',
+      { display: 'block', width: `${MAP_SIZE}px`, height: `${MAP_SIZE}px` },
+      mapPanel,
+    );
+    mapCanvas.width = MAP_SIZE;
+    mapCanvas.height = MAP_SIZE;
     this.minimapCtx = mapCanvas.getContext('2d')!;
 
     // Normalize centerline into the canvas square.
@@ -149,11 +187,14 @@ export class Hud {
       minZ = Math.min(minZ, s.p[2]);
       maxZ = Math.max(maxZ, s.p[2]);
     }
-    const pad = 12;
-    this.mapScale = Math.min((MAP - pad * 2) / (maxX - minX), (MAP - pad * 2) / (maxZ - minZ));
+    const pad = 17;
+    this.mapScale = Math.min(
+      (MAP_SIZE - pad * 2) / (maxX - minX),
+      (MAP_SIZE - pad * 2) / (maxZ - minZ),
+    );
     this.mapOffset = {
-      x: (MAP - this.mapScale * (minX + maxX)) / 2,
-      y: (MAP - this.mapScale * (minZ + maxZ)) / 2,
+      x: (MAP_SIZE - this.mapScale * (minX + maxX)) / 2,
+      y: (MAP_SIZE - this.mapScale * (minZ + maxZ)) / 2,
     };
 
     this.mapPath = new Path2D();
@@ -494,40 +535,66 @@ export class Hud {
     this.crashLabel.style.opacity = snap.crashed ? '1' : '0';
     this.crashLabel.style.transform = `translate(-50%,-50%) scale(${snap.crashed ? '1' : '.92'})`;
 
-    this.drawMinimap(snap.bikePos);
+    this.drawMinimap(snap.bikePos, snap.bikeFwd);
   }
 
-  private drawMinimap(bikePos: THREE.Vector3): void {
+  private drawMinimap(bikePos: THREE.Vector3, bikeFwd: THREE.Vector3): void {
     const ctx = this.minimapCtx;
-    ctx.clearRect(0, 0, 190, 190);
-    ctx.strokeStyle = 'rgba(255,255,255,.55)';
-    ctx.lineWidth = 4;
+    ctx.clearRect(0, 0, MAP_SIZE, MAP_SIZE);
     ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    // Three-stroke hierarchy reads like a real circuit ribbon rather than a
+    // faint wire: black safety outline, steel-grey track, bright racing edge.
+    ctx.strokeStyle = 'rgba(0,0,0,.72)';
+    ctx.lineWidth = 12;
+    ctx.stroke(this.mapPath);
+    ctx.strokeStyle = 'rgba(116,132,151,.9)';
+    ctx.lineWidth = 8;
+    ctx.stroke(this.mapPath);
+    ctx.strokeStyle = 'rgba(245,248,252,.92)';
+    ctx.lineWidth = 3;
     ctx.stroke(this.mapPath);
 
-    // Start line tick.
-    const s0 = this.track.samples[this.track.json.startSampleIndex]!;
-    const [sx, sy] = this.mapPoint(s0.p[0], s0.p[2]);
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(sx - 1.5, sy - 5, 3, 10);
-
-    // Gates.
-    ctx.fillStyle = 'rgba(255,210,80,.9)';
+    // Checkpoints have an outlined MotoGP timing-transponder look.
     for (const [gx, gy] of this.mapGateDots) {
       ctx.beginPath();
-      ctx.arc(gx, gy, 2.2, 0, Math.PI * 2);
+      ctx.arc(gx, gy, 3.4, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(4,7,11,.92)';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(gx, gy, 2, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffd34e';
       ctx.fill();
     }
 
-    // Bike dot.
+    // Compact chequered start/finish marker.
+    const s0 = this.track.samples[this.track.json.startSampleIndex]!;
+    const [sx, sy] = this.mapPoint(s0.p[0], s0.p[2]);
+    for (let row = 0; row < 2; row++) {
+      for (let col = 0; col < 2; col++) {
+        ctx.fillStyle = (row + col) % 2 ? '#111820' : '#fff';
+        ctx.fillRect(sx - 5 + col * 5, sy - 5 + row * 5, 5, 5);
+      }
+    }
+
+    // Bike marker shows direction, not only position.
     const [bx, by] = this.mapPoint(bikePos.x, bikePos.z);
-    ctx.fillStyle = '#ff453a';
+    ctx.save();
+    ctx.translate(bx, by);
+    ctx.rotate(Math.atan2(bikeFwd.z, bikeFwd.x));
     ctx.beginPath();
-    ctx.arc(bx, by, 3.6, 0, Math.PI * 2);
+    ctx.moveTo(8, 0);
+    ctx.lineTo(-5, -5);
+    ctx.lineTo(-3, 0);
+    ctx.lineTo(-5, 5);
+    ctx.closePath();
+    ctx.fillStyle = '#f21f3a';
     ctx.fill();
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 2;
     ctx.strokeStyle = '#fff';
     ctx.stroke();
+    ctx.restore();
   }
 
   private mapPoint(x: number, z: number): [number, number] {
