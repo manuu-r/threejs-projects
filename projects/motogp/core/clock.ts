@@ -15,6 +15,8 @@ export class Clock {
   private rafId = 0;
   private lastTime = 0;
   private accumulator = 0;
+  /** Real elapsed time waiting to be assigned to the next physics batch. */
+  private raceAccumulator = 0;
   private running = false;
 
   /** Physics-only cinematic scale; the accumulator and race clock stay real-time. */
@@ -56,11 +58,21 @@ export class Clock {
 
     let steps = 0;
     this.accumulator += frameDt;
-    while (this.accumulator >= FIXED_DT && steps < PHYSICS.maxSubsteps) {
-      this.onFixedStep(FIXED_DT * this.timeScale, FIXED_DT);
+    this.raceAccumulator += frameDt;
+    const stepsThisFrame = Math.min(
+      Math.floor(this.accumulator / FIXED_DT),
+      PHYSICS.maxSubsteps,
+    );
+    // Physics catch-up is deliberately capped, but a frame hitch must not make
+    // the lap clock run slow. Spread the complete real elapsed interval across
+    // the fixed updates that will execute this frame.
+    const raceDt = stepsThisFrame > 0 ? this.raceAccumulator / stepsThisFrame : 0;
+    while (this.accumulator >= FIXED_DT && steps < stepsThisFrame) {
+      this.onFixedStep(FIXED_DT * this.timeScale, raceDt);
       this.accumulator -= FIXED_DT;
       steps++;
     }
+    if (steps > 0) this.raceAccumulator = 0;
     if (steps === PHYSICS.maxSubsteps) this.accumulator = 0;
 
     this.lastPhysicsMs = performance.now() - t0;

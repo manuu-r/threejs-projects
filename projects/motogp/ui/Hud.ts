@@ -107,7 +107,7 @@ export class Hud {
       el('span', { width: '72px', opacity: '0.75', fontSize: '15px' }, r).textContent = label;
       return el('span', { fontVariantNumeric: 'tabular-nums' }, r);
     };
-    this.currentTime = row('TIME');
+    this.currentTime = row('CURRENT');
     this.lastTime = row('LAST LAP');
     this.bestTime = row('BEST');
     this.sessionBestTime = row('SESSION');

@@ -351,13 +351,18 @@ test("lap timer records valid history with millisecond precision", async () => {
   const timer = new LapTimer();
   timer.start(10);
   assert.equal(timer.lapNumber, 1);
+  assert.ok(Math.abs(timer.currentMs(10.123456) - 123.456) < 1e-9);
   assert.equal(timer.completeLap(94.583), 84583);
+  timer.start(95);
+  assert.equal(timer.completeLap(178.1), 83100);
+  assert.equal(timer.lastLapMs, 83100);
+  assert.equal(timer.sessionBestMs, 83100);
   timer.start(100);
   timer.invalidateCurrent();
   assert.equal(timer.completeLap(180), null);
-  assert.deepEqual(timer.historyMs, [84583]);
-  assert.equal(timer.sessionBestMs, 84583);
-  assert.equal(timer.lapNumber, 3, "invalid attempts still advance the current lap number");
+  assert.deepEqual(timer.historyMs, [84583, 83100]);
+  assert.equal(timer.sessionBestMs, 83100, "invalid laps cannot replace the session best");
+  assert.equal(timer.lapNumber, 4, "invalid attempts still advance the current lap number");
 });
 
 test("HUD presents crash feedback and complete lap timing fields", async () => {
@@ -367,9 +372,32 @@ test("HUD presents crash feedback and complete lap timing fields", async () => {
   );
   assert.match(hudSource, /RIDER DOWN/);
   assert.match(hudSource, /crashVignette/);
-  for (const label of ["TIME", "LAST LAP", "BEST", "SESSION"]) {
+  for (const label of ["CURRENT", "LAST LAP", "BEST", "SESSION"]) {
     assert.match(hudSource, new RegExp(`row\\('${label}'\\)`));
   }
+});
+
+test("keeps one shared WebGL runtime through React development remounts", async () => {
+  const source = await readFile(
+    new URL("projects/motogp/MotoGpGame.tsx", projectRoot),
+    "utf8",
+  );
+  assert.match(source, /new WeakMap<HTMLElement, SharedGameSession>/);
+  assert.match(source, /retainGameSession/);
+  assert.match(source, /releaseGameSession/);
+  assert.match(source, /disposeWhenReady/);
+  assert.match(source, /Follow @manudotdev on X for more Three\.js experiments/);
+  assert.match(source, /motogp-x-follow/);
+});
+
+test("does not lose race-clock time when physics catch-up is capped", async () => {
+  const source = await readFile(
+    new URL("projects/motogp/core/clock.ts", projectRoot),
+    "utf8",
+  );
+  assert.match(source, /raceAccumulator \+= frameDt/);
+  assert.match(source, /this\.raceAccumulator \/ stepsThisFrame/);
+  assert.match(source, /this\.onFixedStep\(FIXED_DT \* this\.timeScale, raceDt\)/);
 });
 
 test("best lap and recent lap history persist safely", async () => {
