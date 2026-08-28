@@ -54,6 +54,12 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
   const GARAGE_TEST = params.has('garagetest');
   /** Dev-only grass/run-off grounding probe. */
   const OFFROAD_TEST = params.has('offroadtest');
+  /** Dev-only exact imported-surface probes used by the collision regression. */
+  const SURFACE_TEST_OBJECT = {
+    runoff: 'Object_17',
+    gravel: 'Object_18',
+    verge: 'Object_32',
+  }[params.get('surfacetest') ?? ''];
   const AUTO_STEPS_PER_FRAME = AUTO_RENDER ? 1 : 200; // real-time vs headless fast-forward
   const AUTO_SIM_LIMIT_SEC = SPEED_TEST ? 24 : BRAKE_TEST ? 14 : STEER_TEST ? 8 : 420;
 
@@ -85,14 +91,28 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
   // to choose the visible road rather than the lower terrain shell.
   const pitGrid = track.samples[track.json.startSampleIndex]!;
   const testLateral = GARAGE_TEST ? 24 : OFFROAD_TEST ? 15 : null;
-  const testX = testLateral === null ? spawn.x : pitGrid.p[0] + pitGrid.n[0] * testLateral;
-  const testZ = testLateral === null ? spawn.z : pitGrid.p[2] + pitGrid.n[2] * testLateral;
+  const exactSurfaceTest = SURFACE_TEST_OBJECT
+    ? representativeSurfacePoint(asphalt, SURFACE_TEST_OBJECT)
+    : null;
+  const testX = exactSurfaceTest?.x ?? (
+    testLateral === null ? spawn.x : pitGrid.p[0] + pitGrid.n[0] * testLateral
+  );
+  const testZ = exactSurfaceTest?.z ?? (
+    testLateral === null ? spawn.z : pitGrid.p[2] + pitGrid.n[2] * testLateral
+  );
   const testSurface = queryPlayableSurface(asphalt, testX, pitGrid.p[1], testZ);
   const defaultSpawnRoad = nearestAsphaltPoint(asphalt, spawn.x, spawn.y, spawn.z);
-  const spawnRoad = testLateral === null
+  const spawnRoad = exactSurfaceTest
+    ? { x: exactSurfaceTest.x, y: exactSurfaceTest.y + 0.035, z: exactSurfaceTest.z }
+    : testLateral === null
     ? defaultSpawnRoad
     : { x: testX, y: testSurface.y + 0.035, z: testZ };
-  const spawnYaw = testLateral === null ? spawn.yaw : Math.atan2(pitGrid.t[0], pitGrid.t[2]);
+  const testSample = exactSurfaceTest
+    ? track.samples[track.nearestSample(exactSurfaceTest.x, exactSurfaceTest.z)]!
+    : pitGrid;
+  const spawnYaw = testLateral === null && !exactSurfaceTest
+    ? spawn.yaw
+    : Math.atan2(testSample.t[0], testSample.t[2]);
   const bike = new Bike(world, spawnRoad, spawnYaw);
   renderer3d.scene.add(bike.root);
   // Do not render the procedural fallback for a frame while the large Ducati
@@ -138,7 +158,7 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
   const bikeFwd = new THREE.Vector3();
   const bikeUp = new THREE.Vector3(0, 1, 0);
   const crashRiderPos = new THREE.Vector3();
-  let lastSafeRoad = OFFROAD_TEST
+  let lastSafeRoad = OFFROAD_TEST || exactSurfaceTest
     ? { x: defaultSpawnRoad.x, y: defaultSpawnRoad.y, z: defaultSpawnRoad.z, yaw: spawn.yaw }
     : { x: spawnRoad.x, y: spawnRoad.y, z: spawnRoad.z, yaw: spawnYaw };
   const safeRoadHistory = [lastSafeRoad];
@@ -234,10 +254,12 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
     }
 
     // A catastrophic fall still needs an immediate reset to protect the WASM
-    // broad phase. Ordinary course exits become a visible crash first.
+    // broad phase. All visually driveable venue layers are part of `surface`,
+    // so this catches a genuine fall through/out of the authored venue rather
+    // than treating green run-off, gravel or grass as a void.
     const catastrophicExit =
       !Number.isFinite(surface.horizontalDistance) ||
-      heightAboveSurface < -2.5 ||
+      heightAboveSurface < -0.75 ||
       bikePos.y < 3;
     if (!STEER_TEST && catastrophicExit) {
       doRespawn(false);
@@ -246,8 +268,11 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
 
     let shouldCrash = false;
     if (!STEER_TEST && !bike.telemetry.crashed) {
-      const leftCircuitEnvelope = roadSurface.horizontalDistance > 16;
-      shouldCrash = leftCircuitEnvelope || respawnMonitor.update(dt, simTimeSec, {
+      // Distance from asphalt invalidates the lap through Checkpoints, but it
+      // must not crash a motorcycle that is still on mapped run-off/gravel.
+      // Only the edge of every authored playable surface starts recovery.
+      const leftPlayableVenue = surface.horizontalDistance > 4;
+      shouldCrash = leftPlayableVenue || respawnMonitor.update(dt, simTimeSec, {
         uprightDot,
         surfaceDistance: surface.horizontalDistance,
         heightAboveSurface,
@@ -514,4 +539,35 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
     renderer3d.dispose();
     container.replaceChildren();
   };
+}
+
+/** Largest authored triangle is a stable point away from a thin surface edge. */
+function representativeSurfacePoint(
+  collision: Awaited<ReturnType<typeof loadAsphaltCollision>>,
+  object: string,
+): { x: number; y: number; z: number } | null {
+  const part = collision.parts?.find((candidate) => candidate.object === object);
+  if (!part) return null;
+  let bestArea = -1;
+  let best: { x: number; y: number; z: number } | null = null;
+  const end = (part.triangleOffset + part.triangleCount) * 3;
+  for (let i = part.triangleOffset * 3; i < end; i += 3) {
+    const ia = collision.triangles[i]! * 3;
+    const ib = collision.triangles[i + 1]! * 3;
+    const ic = collision.triangles[i + 2]! * 3;
+    const ax = collision.vertices[ia]!;
+    const ay = collision.vertices[ia + 1]!;
+    const az = collision.vertices[ia + 2]!;
+    const bx = collision.vertices[ib]!;
+    const by = collision.vertices[ib + 1]!;
+    const bz = collision.vertices[ib + 2]!;
+    const cx = collision.vertices[ic]!;
+    const cy = collision.vertices[ic + 1]!;
+    const cz = collision.vertices[ic + 2]!;
+    const area = Math.abs((bx - ax) * (cz - az) - (bz - az) * (cx - ax));
+    if (area <= bestArea) continue;
+    bestArea = area;
+    best = { x: (ax + bx + cx) / 3, y: (ay + by + cy) / 3, z: (az + bz + cz) / 3 };
+  }
+  return best;
 }

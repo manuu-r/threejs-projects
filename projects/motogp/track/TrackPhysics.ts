@@ -22,7 +22,9 @@ export interface AsphaltCollisionData {
 
 const GRID_CELL_SIZE = 25;
 const ASPHALT_ROLES = new Set(['asphalt']);
-const PLAYABLE_ROLES = new Set(['asphalt', 'curb', 'gravel', 'terrain', 'verge', 'paving']);
+const PLAYABLE_ROLES = new Set([
+  'asphalt', 'curb', 'runoff', 'gravel', 'terrain', 'verge', 'paving',
+]);
 const asphaltSpatialIndexes = new WeakMap<AsphaltCollisionData, Map<string, number[]>>();
 const playableSpatialIndexes = new WeakMap<AsphaltCollisionData, Map<string, number[]>>();
 
@@ -223,6 +225,7 @@ function frictionForRole(role: string): number {
   switch (role) {
     case 'asphalt': return SURFACES.asphaltFriction;
     case 'curb': return SURFACES.kerbFriction;
+    case 'runoff': return SURFACES.runoffFriction;
     case 'gravel': return SURFACES.gravelFriction;
     case 'paving': return SURFACES.pavingFriction;
     case 'barrier': return SURFACES.barrierFriction;

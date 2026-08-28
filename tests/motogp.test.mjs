@@ -78,6 +78,9 @@ test("recovers against the authored asphalt instead of a synthetic world floor",
   assert.ok(collision.vertices.length / 3 >= 100_000, "all authored driveable surfaces must ship");
   assert.ok(collision.triangles.length / 3 >= 70_000, "collision must cover every tarmac section");
   assert.ok(collision.parts.some((part) => part.object === "Object_24" && part.role === "asphalt"));
+  assert.ok(collision.parts.some((part) => part.object === "Object_17" && part.role === "runoff"));
+  assert.ok(collision.parts.some((part) => part.object === "Object_18" && part.role === "gravel"));
+  assert.ok(collision.parts.some((part) => part.object === "Object_32" && part.role === "verge"));
   for (const part of collision.parts) {
     const first = part.triangleOffset * 3;
     const end = first + part.triangleCount * 3;
@@ -88,6 +91,7 @@ test("recovers against the authored asphalt instead of a synthetic world floor",
   }
   assert.match(physicsSource, /frictionForRole/);
   assert.match(physicsSource, /case 'gravel'/);
+  assert.match(physicsSource, /case 'runoff'/);
   assert.match(physicsSource, /garageApron/);
   assert.match(physicsSource, /const inner = 6/);
   assert.match(physicsSource, /const outer = 42/);
@@ -95,7 +99,30 @@ test("recovers against the authored asphalt instead of a synthetic world floor",
   assert.match(physicsSource, /buildVenueObstaclePhysics/);
   assert.match(physicsSource, /world\.addStaticBox/);
   assert.match(runtimeSource, /bike\.forceCrash\(0\.82\)/);
+  assert.doesNotMatch(runtimeSource, /roadSurface\.horizontalDistance > 16/);
   assert.match(runtimeSource, /startCrashSequence/);
+});
+
+test("maps every added run-off layer as upward rideable geometry", async () => {
+  const collision = JSON.parse(await readFile(
+    new URL("public/motogp/nurburgring-asphalt-collision.json", projectRoot),
+    "utf8",
+  ));
+  for (const object of ["Object_17", "Object_18", "Object_32"]) {
+    const part = collision.parts.find((candidate) => candidate.object === object);
+    assert.ok(part, `${object} must have authored collision`);
+    assert.ok(part.triangleCount > 300, `${object} must retain its complete surface sheet`);
+    const first = part.triangleOffset * 3;
+    const end = first + part.triangleCount * 3;
+    for (let triangle = first; triangle < end; triangle += 3) {
+      const indices = collision.triangles.slice(triangle, triangle + 3);
+      const [a, b, c] = indices.map((index) => collision.vertices.slice(index * 3, index * 3 + 3));
+      const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+      const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+      const normalY = ab[2] * ac[0] - ab[0] * ac[2];
+      assert.ok(normalY > 0, `${object} collision must be wound upward`);
+    }
+  }
 });
 
 test("never reads detached Jolt wheel handles from the render loop", async () => {

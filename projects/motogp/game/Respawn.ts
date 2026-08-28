@@ -2,7 +2,7 @@ import { RESPAWN } from '../config';
 
 /**
  * Auto-respawn watchdog: fires when the bike leaves the playable envelope —
- * fell through the authored asphalt, left its playable envelope, or has been
+ * fell through the authored venue, left its playable envelope, or has been
  * upside-down too long. Manual respawn (R) bypasses the checks but still owes
  * the cooldown.
  */
@@ -12,7 +12,7 @@ export class RespawnMonitor {
 
   /**
    * Feed once per fixed step.
-   * The inputs are measured against the real asphalt triangle mesh. The old
+   * The inputs are measured against the real playable triangle meshes. The old
    * generated centerline is intentionally excluded because it follows a wrong
    * branch in parts of this supplied venue.
    */

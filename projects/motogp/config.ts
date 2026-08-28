@@ -124,6 +124,8 @@ export const TYRES = {
 
 export const SURFACES = {
   asphaltFriction: 1.25,
+  /** Painted run-off remains rideable, with less grip than dry asphalt. */
+  runoffFriction: 0.92,
   grassFriction: 0.55,
   gravelFriction: 0.72,
   kerbFriction: 1.1,

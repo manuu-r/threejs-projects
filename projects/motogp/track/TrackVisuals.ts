@@ -1,13 +1,16 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-type SurfaceKind = 'asphalt' | 'kerb' | 'gravel' | 'grass' | 'paving';
+type SurfaceKind = 'asphalt' | 'kerb' | 'runoff' | 'gravel' | 'grass' | 'paving';
 
 const DRIVEABLE_SURFACES = new Map<string, { roughness: number; kind: SurfaceKind }>([
+  ['Object_17', { roughness: 0.78, kind: 'runoff' }], // green painted run-off
+  ['Object_18', { roughness: 0.98, kind: 'gravel' }], // outer gravel traps
   ['Object_22', { roughness: 0.95, kind: 'grass' }], // terrain underlay
   ['Object_24', { roughness: 0.84, kind: 'asphalt' }], // asphalt
   ['Object_25', { roughness: 0.7, kind: 'kerb' }], // painted kerbs
   ['Object_27', { roughness: 0.98, kind: 'gravel' }], // gravel
+  ['Object_32', { roughness: 0.95, kind: 'grass' }], // kerb-side verge
   ['Object_34', { roughness: 0.95, kind: 'grass' }], // verge
   ['Object_40', { roughness: 0.82, kind: 'paving' }], // pit paving
 ]);
@@ -40,6 +43,7 @@ export async function loadTrackVisuals(
     // under a shallow racing-camera angle.
     asphalt: createSurfaceMaps(0x93a5, 0.08, 0.72),
     kerb: createSurfaceMaps(0xc11b, 0.12, 0.48),
+    runoff: createSurfaceMaps(0x82a1, 0.1, 0.5),
     gravel: createSurfaceMaps(0x6a7e, 0.1, 1.35),
     grass: createSurfaceMaps(0x51a5, 0.08, 1.15),
     paving: createSurfaceMaps(0xb17a, 0.1, 0.62),
