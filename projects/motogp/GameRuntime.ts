@@ -11,6 +11,7 @@ import { RespawnMonitor } from './game/Respawn';
 import { TrackData } from './track/TrackData';
 import {
   buildTrackPhysics,
+  buildVenueObstaclePhysics,
   loadAsphaltCollision,
   nearestAsphaltPoint,
   queryAsphaltSurface,
@@ -69,6 +70,7 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
   const asphalt = await loadAsphaltCollision();
   buildTrackPhysics(world, track, asphalt);
   const trackVisuals = await loadTrackVisuals(renderer3d.scene);
+  buildVenueObstaclePhysics(world, trackVisuals, asphalt);
   const atmosphere = createTrackAtmosphere(track);
   renderer3d.scene.add(atmosphere.root);
   const surfaceDetails = createTrackSurfaceDetails(track);
@@ -176,12 +178,7 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
     bike.prePhysicsUpdate(dt, intent);
     world.step(dt);
     const crash = bike.postPhysicsUpdate(dt);
-    if (crash) {
-      slowMotion.trigger(crash.severity);
-      checkpoints.invalidate();
-      if (lapTimer.running) lapTimer.invalidateCurrent();
-      controls.reset();
-    }
+    if (crash) startCrashSequence(crash.severity);
     // Read directly from Jolt. Visual root transforms update only once per
     // rendered frame and were too stale to protect a fast-moving bike.
     const uprightDot = bike.getPhysicsPoseInto(bikePos, bikeFwd);
@@ -236,24 +233,29 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
       }
     }
 
-    // Auto-respawn watchdog.
-    const outsideWorld =
+    // A catastrophic fall still needs an immediate reset to protect the WASM
+    // broad phase. Ordinary course exits become a visible crash first.
+    const catastrophicExit =
       !Number.isFinite(surface.horizontalDistance) ||
-      surface.horizontalDistance > 35 ||
-      heightAboveSurface < -0.9 ||
-      (roadSurface.horizontalDistance < 18 && heightAboveRoad < -0.45) ||
+      heightAboveSurface < -2.5 ||
       bikePos.y < 3;
-    let needsRespawn = !STEER_TEST && outsideWorld;
-    if (!needsRespawn && !STEER_TEST && !bike.telemetry.crashed) {
-      needsRespawn = respawnMonitor.update(dt, simTimeSec, {
+    if (!STEER_TEST && catastrophicExit) {
+      doRespawn(false);
+      return;
+    }
+
+    let shouldCrash = false;
+    if (!STEER_TEST && !bike.telemetry.crashed) {
+      const leftCircuitEnvelope = roadSurface.horizontalDistance > 16;
+      shouldCrash = leftCircuitEnvelope || respawnMonitor.update(dt, simTimeSec, {
         uprightDot,
         surfaceDistance: surface.horizontalDistance,
         heightAboveSurface,
       });
     }
-    if (needsRespawn) {
-      if (AUTO) console.log(`[lap] auto-respawn @${simTimeSec.toFixed(2)}s`);
-      doRespawn(false);
+    if (shouldCrash && bike.forceCrash(0.82)) {
+      if (AUTO) console.log(`[lap] course-exit crash @${simTimeSec.toFixed(2)}s`);
+      startCrashSequence(0.82);
     }
   }
 
@@ -289,6 +291,8 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
           lapNumber: lapTimer.lapNumber,
           lapHistoryMs: lapTimer.historyMs,
           lapValid: checkpoints.valid,
+          crashed: bike.telemetry.crashed,
+          impactSeverity: bike.telemetry.impactSeverity,
           cameraMode: chase.modeLabel,
           bikePos,
         },
@@ -405,6 +409,13 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
     if (lapTimer.running) lapTimer.invalidateCurrent();
   }
 
+  function startCrashSequence(severity: number): void {
+    slowMotion.trigger(severity);
+    checkpoints.invalidate();
+    if (lapTimer.running) lapTimer.invalidateCurrent();
+    controls.reset();
+  }
+
   clock.onFrame = (frameDt) => {
     const cinematic = slowMotion.update(frameDt);
     clock.timeScale = cinematic.timeScale;
@@ -461,6 +472,8 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
         lapNumber: lapTimer.lapNumber,
         lapHistoryMs: lapTimer.historyMs,
         lapValid: checkpoints.valid,
+        crashed: bike.telemetry.crashed,
+        impactSeverity: bike.telemetry.impactSeverity,
         cameraMode: chase.modeLabel,
         bikePos,
       },

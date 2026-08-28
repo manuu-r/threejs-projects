@@ -33,7 +33,7 @@ export class Renderer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.setSize(container.clientWidth || window.innerWidth, container.clientHeight || window.innerHeight);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.46;
+    this.renderer.toneMappingExposure = 0.52;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
     // PCF shadows remain stable as the shadow camera follows the motorcycle.
@@ -48,9 +48,9 @@ export class Renderer {
     // grass) from z-fighting at distance — 0.1 costs 5× of it for nothing.
     this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.5, 2500);
 
-    this.scene.add(new THREE.HemisphereLight(0xd8e9ff, 0x4b5638, 0.14));
+    this.scene.add(new THREE.HemisphereLight(0xd8e9ff, 0x4b5638, 0.18));
 
-    this.sun = new THREE.DirectionalLight(0xfff1d6, 1.28);
+    this.sun = new THREE.DirectionalLight(0xfff1d6, 1.48);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.bias = -0.00008;
@@ -87,7 +87,7 @@ export class Renderer {
     pmrem.compileCubemapShader();
     this.environmentTarget = pmrem.fromScene(this.scene, 0.02, 0.1, 10000);
     this.scene.environment = this.environmentTarget.texture;
-    this.scene.environmentIntensity = 0.16;
+    this.scene.environmentIntensity = 0.22;
     pmrem.dispose();
 
     const width = container.clientWidth || window.innerWidth;

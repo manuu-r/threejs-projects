@@ -92,6 +92,24 @@ test("recovers against the authored asphalt instead of a synthetic world floor",
   assert.match(physicsSource, /const inner = 6/);
   assert.match(physicsSource, /const outer = 42/);
   assert.match(physicsSource, /PLAYABLE_ROLES/);
+  assert.match(physicsSource, /buildVenueObstaclePhysics/);
+  assert.match(physicsSource, /world\.addStaticBox/);
+  assert.match(runtimeSource, /bike\.forceCrash\(0\.82\)/);
+  assert.match(runtimeSource, /startCrashSequence/);
+});
+
+test("never reads detached Jolt wheel handles from the render loop", async () => {
+  const bikeSource = await readFile(
+    new URL("projects/motogp/game/Bike.ts", projectRoot),
+    "utf8",
+  );
+  const syncVisuals = bikeSource.slice(
+    bikeSource.indexOf("syncVisuals(interpolationAlpha"),
+    bikeSource.indexOf("respawnAt(", bikeSource.indexOf("syncVisuals(interpolationAlpha")),
+  );
+  assert.match(bikeSource, /captureWheelState/);
+  assert.match(syncVisuals, /wheelSuspensionLength/);
+  assert.doesNotMatch(syncVisuals, /constraint\.GetWheel/);
 });
 
 test("removes the accidental legacy bike and hardens driveable track materials", async () => {
@@ -154,6 +172,8 @@ test("adds tiled track micro-detail and bounded speed effects", async () => {
   assert.match(speedSource, /WheelMotionBlur/);
   assert.match(speedSource, /DynamicTyreMarks/);
   assert.match(speedSource, /surfaceDistance > 0\.65/);
+  assert.match(speedSource, /createSoftParticleMap/);
+  assert.match(speedSource, /createRadialGradient/);
   assert.doesNotMatch(speedSource, /throttle > 0\.82/);
   assert.match(atmosphereSource, /new THREE\.InstancedMesh/);
   assert.match(atmosphereSource, /new THREE\.LOD/);
@@ -307,6 +327,18 @@ test("lap timer records valid history with millisecond precision", async () => {
   assert.deepEqual(timer.historyMs, [84583]);
   assert.equal(timer.sessionBestMs, 84583);
   assert.equal(timer.lapNumber, 3, "invalid attempts still advance the current lap number");
+});
+
+test("HUD presents crash feedback and complete lap timing fields", async () => {
+  const hudSource = await readFile(
+    new URL("projects/motogp/ui/Hud.ts", projectRoot),
+    "utf8",
+  );
+  assert.match(hudSource, /RIDER DOWN/);
+  assert.match(hudSource, /crashVignette/);
+  for (const label of ["TIME", "LAST LAP", "BEST", "SESSION"]) {
+    assert.match(hudSource, new RegExp(`row\\('${label}'\\)`));
+  }
 });
 
 test("best lap and recent lap history persist safely", async () => {

@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { SURFACES } from '../config';
 import type { PhysicsWorld } from '../core/physicsWorld';
 import type { TrackData } from './TrackData';
@@ -110,6 +111,72 @@ export function buildTrackPhysics(
   });
 
   world.optimizeBroadPhase();
+}
+
+/**
+ * Add bounded collision proxies for visible opaque venue structures that are
+ * not already present in the exact surface/barrier export. Importing every
+ * decorative triangle exhausted Jolt's fixed WASM heap; compact world-space
+ * proxies provide reliable building/stand/prop impacts at negligible cost.
+ */
+export function buildVenueObstaclePhysics(
+  world: PhysicsWorld,
+  visuals: THREE.Object3D,
+  authored: AsphaltCollisionData,
+): number {
+  const alreadyAuthored = new Set(authored.parts?.map((part) => part.object) ?? []);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  let colliderCount = 0;
+
+  visuals.updateMatrixWorld(true);
+  visuals.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    const sourceName = venueSourceName(object);
+    if (sourceName && alreadyAuthored.has(sourceName)) return;
+
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    // Alpha foliage, painted overlays and fence cut-outs are either visual-only
+    // or already represented by Object_46's exact barrier collision.
+    if (materials.every((material) => material.transparent || material.opacity < 0.98)) return;
+
+    const position = object.geometry.getAttribute('position');
+    if (!position || position.count < 3) return;
+    object.geometry.computeBoundingBox();
+    const bounds = object.geometry.boundingBox?.clone().applyMatrix4(object.matrixWorld);
+    if (!bounds) return;
+    bounds.getSize(size);
+    // Flat paint/decal meshes need no volume; circuit-wide grouped scenery is
+    // protected by the exact perimeter barrier and must not become one giant
+    // AABB across the racing surface.
+    if (
+      size.y < 0.35 || size.y > 80 ||
+      size.x < 0.2 || size.z < 0.2 ||
+      size.x > 160 || size.z > 160 ||
+      size.x * size.z > 12_000
+    ) return;
+    bounds.getCenter(center);
+    world.addStaticBox(
+      { x: size.x * 0.5, y: size.y * 0.5, z: size.z * 0.5 },
+      center,
+      {
+        friction: SURFACES.barrierFriction,
+        restitution: 0,
+      },
+    );
+    colliderCount++;
+  });
+  world.optimizeBroadPhase();
+  return colliderCount;
+}
+
+function venueSourceName(object: THREE.Object3D): string | null {
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    if (/^Object_\d+$/.test(current.name)) return current.name;
+    current = current.parent;
+  }
+  return null;
 }
 
 /**

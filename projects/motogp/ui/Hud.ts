@@ -16,6 +16,8 @@ export interface HudSnapshot {
   lapHistoryMs: readonly number[];
   /** False while the in-progress lap is invalidated. */
   lapValid: boolean;
+  crashed: boolean;
+  impactSeverity: number;
   cameraMode: string;
   bikePos: THREE.Vector3;
 }
@@ -57,6 +59,8 @@ export class Hud {
   private readonly lapHistory: HTMLElement;
   private readonly invalidFlash: HTMLElement;
   private readonly newBestFlash: HTMLElement;
+  private readonly crashVignette: HTMLElement;
+  private readonly crashLabel: HTMLElement;
   private readonly cameraMode: HTMLElement;
   private readonly cockpitTft: HTMLElement;
   private readonly cockpitSpeed: HTMLElement;
@@ -100,11 +104,11 @@ export class Hud {
     );
     const row = (label: string): HTMLElement => {
       const r = el('div', { display: 'flex', gap: '10px' }, laps);
-      el('span', { width: '58px', opacity: '0.75', fontSize: '15px' }, r).textContent = label;
+      el('span', { width: '72px', opacity: '0.75', fontSize: '15px' }, r).textContent = label;
       return el('span', { fontVariantNumeric: 'tabular-nums' }, r);
     };
     this.currentTime = row('TIME');
-    this.lastTime = row('LAST');
+    this.lastTime = row('LAST LAP');
     this.bestTime = row('BEST');
     this.sessionBestTime = row('SESSION');
     this.lapNumber = row('LAP');
@@ -375,6 +379,41 @@ export class Hud {
     );
     this.newBestFlash.textContent = 'NEW PERSONAL BEST';
 
+    this.crashVignette = el(
+      'div',
+      {
+        position: 'absolute',
+        inset: '0',
+        zIndex: '5',
+        background: 'radial-gradient(circle at center, transparent 34%, rgba(92,0,5,.2) 68%, rgba(120,0,8,.72) 100%)',
+        opacity: '0',
+        transition: 'opacity .12s ease-out',
+      },
+      this.root,
+    );
+    this.crashLabel = el(
+      'div',
+      {
+        position: 'absolute',
+        left: '50%',
+        top: '22%',
+        zIndex: '6',
+        transform: 'translate(-50%,-50%) scale(.92)',
+        padding: '10px 18px',
+        border: '1px solid rgba(255,104,112,.78)',
+        borderRadius: '5px',
+        background: 'rgba(28,2,4,.76)',
+        color: '#ff737c',
+        fontSize: '24px',
+        fontWeight: '900',
+        letterSpacing: '3px',
+        opacity: '0',
+        transition: 'opacity .12s, transform .18s',
+      },
+      this.root,
+    );
+    this.crashLabel.textContent = 'RIDER DOWN';
+
     this.cameraMode = el(
       'div',
       {
@@ -448,6 +487,12 @@ export class Hud {
     const showBest = nowMs < this.bestFlashUntil;
     this.newBestFlash.style.opacity = showBest ? '1' : '0';
     this.newBestFlash.style.transform = `translate(-50%,-50%) scale(${showBest ? '1' : '.96'})`;
+    const crashOpacity = snap.crashed
+      ? THREE.MathUtils.lerp(0.42, 0.78, THREE.MathUtils.clamp(snap.impactSeverity, 0, 1))
+      : 0;
+    this.crashVignette.style.opacity = crashOpacity.toFixed(2);
+    this.crashLabel.style.opacity = snap.crashed ? '1' : '0';
+    this.crashLabel.style.transform = `translate(-50%,-50%) scale(${snap.crashed ? '1' : '.92'})`;
 
     this.drawMinimap(snap.bikePos);
   }

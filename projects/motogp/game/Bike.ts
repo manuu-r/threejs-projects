@@ -91,6 +91,14 @@ export class Bike {
   private readonly posePreviousQuaternion = new THREE.Quaternion();
   private readonly poseCurrentQuaternion = new THREE.Quaternion();
   private hasPhysicsPose = false;
+  /**
+   * Render-safe copies of wheel state. Jolt wheel wrappers are borrowed WASM
+   * handles and become invalid as soon as a crash detaches the constraint.
+   * The render loop must never retain or query them.
+   */
+  private readonly wheelSuspensionLength = [WHEELS.suspensionMaxLength, WHEELS.suspensionMaxLength];
+  private readonly wheelRotationAngle = [0, 0];
+  private readonly wheelSteerAngle = [0, 0];
   private readonly gearbox = new AutomaticGearbox({
     gearRatios: TRANSMISSION.gearRatios,
     differentialRatio: DIFFERENTIAL.ratio,
@@ -161,6 +169,7 @@ export class Bike {
     this.Jolt.destroy(zero);
     this.controller.SetDriverInput(0, 0, 0, 0);
     this.hasPhysicsPose = false;
+    this.captureWheelState();
     this.syncVisuals();
   }
 
@@ -245,7 +254,7 @@ export class Bike {
       if (!(material instanceof THREE.MeshStandardMaterial)) return material;
       const name = material.name.toLowerCase();
       const rider = /rider|ch20_body/.test(`${mesh.name} ${name}`.toLowerCase());
-      const fairing = !rider && /motogp|ducati|021615/.test(name);
+      const fairing = !rider && /motogp|ducati|021615|frontcolor|m_0020_red|mediumblue/.test(name);
       if (fairing && !(material instanceof THREE.MeshPhysicalMaterial)) {
         material = this.toPhysicalFairing(material);
       }
@@ -258,7 +267,7 @@ export class Bike {
       if (material.metalnessMap) material.metalnessMap.colorSpace = THREE.NoColorSpace;
       if (material.aoMap) material.aoMap.colorSpace = THREE.NoColorSpace;
 
-      const metal = /metal|silver|bolt|fork|chain|rearset|velg/.test(name);
+      const metal = /metal|silver|bolt|fork|forcella|chain|rearset|velg|handlebars|wheelfixed|wheelfront00/.test(name);
       const carbon = /carbon/.test(name);
       const rubber = /tyre|tire|rubber|wheelfront1mtl|wheelrear0061mtl/.test(name);
       if (rider) {
@@ -266,7 +275,7 @@ export class Bike {
         material.roughness = 0.6;
       } else if (metal) {
         material.metalness = Math.max(material.metalness, 0.82);
-        material.roughness = THREE.MathUtils.clamp(material.roughness, 0.18, 0.38);
+        material.roughness = THREE.MathUtils.clamp(material.roughness, 0.2, 0.42);
       } else if (carbon) {
         material.metalness = 0.18;
         material.roughness = 0.3;
@@ -275,9 +284,9 @@ export class Bike {
         material.roughness = 0.88;
       } else if (fairing) {
         material.metalness = Math.max(material.metalness, 0.08);
-        material.roughness = Math.min(material.roughness, 0.28);
+        material.roughness = THREE.MathUtils.clamp(material.roughness, 0.16, 0.24);
       }
-      material.envMapIntensity = rider ? 0.52 : metal ? 1.65 : fairing ? 1.35 : 1.0;
+      material.envMapIntensity = rider ? 0.48 : metal ? 1.45 : fairing ? 1.18 : 0.9;
       material.needsUpdate = true;
       return material;
     });
@@ -316,8 +325,8 @@ export class Bike {
       side: source.side,
       depthTest: source.depthTest,
       depthWrite: source.depthWrite,
-      clearcoat: 0.82,
-      clearcoatRoughness: 0.17,
+      clearcoat: 0.94,
+      clearcoatRoughness: 0.13,
       sheen: 0.08,
       sheenRoughness: 0.5,
       sheenColor: new THREE.Color(0x8f1018),
@@ -446,6 +455,7 @@ export class Bike {
     this.telemetry.impactSeverity = 0;
     this.crashDetector.reset();
     this.applyGearboxReset();
+    this.captureWheelState();
   }
 
   /** Called once per fixed step, BEFORE world.step(). */
@@ -454,9 +464,8 @@ export class Bike {
     const { vec3 } = scratch;
 
     if (this.telemetry.crashed) {
-      // Once the vehicle constraint is detached, the chassis and rider are
-      // ordinary continuous rigid bodies. No steering, lean spring, brake, or
-      // anti-wheelie force should interfere with the physical crash.
+      // Crash entry clears the controller once. Do not feed steering, drive,
+      // lean-helper, brake, or anti-wheelie forces into the incident.
       return;
     }
 
@@ -576,10 +585,15 @@ export class Bike {
       this.hasPhysicsPose = true;
     }
     this.telemetry.leanDeg = computeLean(quat);
-    this.telemetry.rpm = this.controller.GetEngine().GetCurrentRPM();
+    if (this.vehicleConstraintAttached) {
+      this.telemetry.rpm = this.controller.GetEngine().GetCurrentRPM();
+      this.captureWheelState();
+    } else {
+      this.telemetry.wheelContacts[0] = false;
+      this.telemetry.wheelContacts[1] = false;
+      this.telemetry.rpm = Math.max(ENGINE.minRpm, this.telemetry.rpm - dt * 4000);
+    }
     this.telemetry.gear = this.gearbox.gear;
-    this.telemetry.wheelContacts[0] = this.constraint.GetWheel(0).HasContact();
-    this.telemetry.wheelContacts[1] = this.constraint.GetWheel(1).HasContact();
 
     if (this.telemetry.crashed) return null;
     const qx = quat.GetX(), qz = quat.GetZ();
@@ -626,8 +640,7 @@ export class Bike {
     }
 
     for (const [i, mesh] of this.wheelMeshes.entries()) {
-      const wheel = this.constraint.GetWheel(i);
-      const suspLen = wheel.GetSuspensionLength();
+      const suspLen = this.wheelSuspensionLength[i] ?? WHEELS.suspensionMaxLength;
       const isFront = i === 0;
       // Suspension travel along the (castered) suspension direction.
       let dy = -suspLen;
@@ -639,8 +652,8 @@ export class Bike {
       }
       mesh.position.set(0, WHEELS.attachY + dy, (isFront ? WHEELS.zFront : WHEELS.zRear) + dz);
       mesh.rotation.set(
-        wheel.GetRotationAngle(),
-        isFront ? wheel.GetSteerAngle() : 0,
+        this.wheelRotationAngle[i] ?? 0,
+        isFront ? (this.wheelSteerAngle[i] ?? 0) : 0,
         0,
         'YXZ', // spin about X applied in the steered frame
       );
@@ -669,6 +682,13 @@ export class Bike {
     this.hasPreviousVelocity = false;
     this.hasPhysicsPose = false;
     this.applyGearboxReset();
+  }
+
+  /** Enter the same physical rider-ejection crash used for hard impacts. */
+  forceCrash(severity = 0.8): boolean {
+    if (this.telemetry.crashed) return false;
+    this.beginCrash(THREE.MathUtils.clamp(severity, 0, 1));
+    return true;
   }
 
   /** World-space rider position for the cinematic crash camera. */
@@ -746,7 +766,12 @@ export class Bike {
   private beginCrash(severity: number): void {
     this.telemetry.crashed = true;
     this.telemetry.impactSeverity = severity;
-    this.detachVehicleConstraint();
+    // Keep the constraint and its native step listener registered. Removing a
+    // live VehicleConstraintStepListener from the wasm-compat binding leaves a
+    // stale native callback that fails as `null function` on the next Step().
+    // Neutral input lets the chassis continue as an unpowered physical bike,
+    // while the rider is ejected into the separate capsule below.
+    this.controller.SetDriverInput(0, 0, 0, 0);
     if (!this.riderVisual || !this.root.parent) return;
 
     this.root.updateMatrixWorld(true);
@@ -830,18 +855,23 @@ export class Bike {
     }
   }
 
-  private detachVehicleConstraint(): void {
-    if (!this.vehicleConstraintAttached) return;
-    if (this.stepListener) this.world.physicsSystem.RemoveStepListener(this.stepListener);
-    this.world.physicsSystem.RemoveConstraint(this.constraint);
-    this.vehicleConstraintAttached = false;
-  }
-
   private attachVehicleConstraint(): void {
     if (this.vehicleConstraintAttached) return;
     this.world.physicsSystem.AddConstraint(this.constraint);
     if (this.stepListener) this.world.physicsSystem.AddStepListener(this.stepListener);
     this.vehicleConstraintAttached = true;
+  }
+
+  /** Copy borrowed wheel data while the constraint is known to be attached. */
+  private captureWheelState(): void {
+    if (!this.vehicleConstraintAttached) return;
+    for (let i = 0; i < this.wheelSuspensionLength.length; i++) {
+      const wheel = this.constraint.GetWheel(i);
+      this.wheelSuspensionLength[i] = wheel.GetSuspensionLength();
+      this.wheelRotationAngle[i] = wheel.GetRotationAngle();
+      this.wheelSteerAngle[i] = wheel.GetSteerAngle();
+      this.telemetry.wheelContacts[i] = wheel.HasContact();
+    }
   }
 
   /** Low-poly fallback shown only if the authored Ducati GLB fails to load. */

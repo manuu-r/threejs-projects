@@ -271,7 +271,9 @@ function createSurfaceMaps(seed: number, repeat: number, relief: number): Surfac
       normalData[i + 1] = Math.round((ny * 0.5 + 0.5) * 255);
       normalData[i + 2] = Math.round(inv * 255);
       normalData[i + 3] = 255;
-      const asphaltTone = Math.round(60 + (h - 0.5) * 24 + (hash(x * 7, y * 11) > 0.992 ? 22 : 0));
+      // Fresh race asphalt is dark grey, not crushed black. Retain enough
+      // albedo for sunlight, tyre wear and contact shadows to remain legible.
+      const asphaltTone = Math.round(76 + (h - 0.5) * 22 + (hash(x * 7, y * 11) > 0.992 ? 18 : 0));
       albedoData.set([asphaltTone, asphaltTone + 1, asphaltTone + 3, 255], i);
       const rough = THREE.MathUtils.clamp(0.72 + (h - 0.5) * 0.34, 0, 1) * 255;
       roughData.set([rough, rough, rough, 255], i);

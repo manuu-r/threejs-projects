@@ -159,10 +159,12 @@ class ParticlePool {
     this.life = new Float32Array(count);
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+    const particleMap = createSoftParticleMap();
     const material = new THREE.PointsMaterial({
       color,
       size,
       sizeAttenuation: true,
+      map: particleMap,
       transparent: true,
       opacity,
       depthWrite: false,
@@ -202,8 +204,27 @@ class ParticlePool {
 
   dispose(): void {
     this.points.geometry.dispose();
-    (this.points.material as THREE.Material).dispose();
+    const material = this.points.material as THREE.PointsMaterial;
+    material.map?.dispose();
+    material.dispose();
   }
+}
+
+/** Soft alpha falloff avoids the square confetti look of raw point sprites. */
+function createSoftParticleMap(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const context = canvas.getContext('2d')!;
+  const gradient = context.createRadialGradient(32, 32, 2, 32, 32, 31);
+  gradient.addColorStop(0, 'rgba(255,255,255,0.82)');
+  gradient.addColorStop(0.35, 'rgba(255,255,255,0.42)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 64, 64);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.NoColorSpace;
+  return texture;
 }
 
 function createWheelBlurMaterial(): THREE.ShaderMaterial {
