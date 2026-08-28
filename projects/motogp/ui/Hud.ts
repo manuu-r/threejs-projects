@@ -45,6 +45,7 @@ function fmtTime(ms: number | null): string {
 export class Hud {
   private readonly root: HTMLElement;
   private readonly speedValue: HTMLElement;
+  private readonly speedCluster: HTMLElement;
   private readonly gearValue: HTMLElement;
   private readonly rpmFill: HTMLElement;
   private readonly leanNeedle: HTMLElement;
@@ -175,6 +176,7 @@ export class Hud {
       },
       this.root,
     );
+    this.speedCluster = cluster;
 
     const rpmTrack = el(
       'div',
@@ -218,15 +220,15 @@ export class Hud {
       {
         position: 'absolute',
         left: '50%',
-        bottom: '92px',
+        bottom: '14px',
         transform: 'translateX(-50%) perspective(300px) rotateX(8deg)',
-        width: '222px',
-        height: '98px',
+        width: '178px',
+        height: '78px',
         display: 'none',
         overflow: 'hidden',
         boxSizing: 'border-box',
         border: '2px solid #aeb6c1',
-        borderRadius: '9px',
+        borderRadius: '7px',
         background: 'linear-gradient(145deg,#111720,#030507 72%)',
         boxShadow: '0 4px 14px rgba(0,0,0,.82), inset 0 0 0 2px rgba(0,0,0,.8)',
         textShadow: 'none',
@@ -236,15 +238,15 @@ export class Hud {
     const tftHeader = el(
       'div',
       {
-        height: '18px',
-        padding: '1px 9px 0',
+        height: '15px',
+        padding: '1px 7px 0',
         boxSizing: 'border-box',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         background: '#c9152b',
         color: '#fff',
-        fontSize: '9px',
+        fontSize: '7px',
         fontWeight: '900',
         fontStyle: 'italic',
         letterSpacing: '.8px',
@@ -255,7 +257,7 @@ export class Hud {
     el('span', {}, tftHeader).textContent = 'MARC 93';
     const tftMain = el(
       'div',
-      { display: 'flex', height: '56px', alignItems: 'center', padding: '0 10px' },
+      { display: 'flex', height: '43px', alignItems: 'center', padding: '0 8px' },
       this.cockpitTft,
     );
     this.cockpitSpeed = el(
@@ -263,7 +265,7 @@ export class Hud {
       {
         flex: '1',
         color: '#f5f8fc',
-        fontSize: '42px',
+        fontSize: '32px',
         fontWeight: '900',
         lineHeight: '1',
         textAlign: 'center',
@@ -271,12 +273,12 @@ export class Hud {
       },
       tftMain,
     );
-    el('span', { fontSize: '10px', color: '#aeb7c4', marginLeft: '-5px', alignSelf: 'flex-end', marginBottom: '9px' }, tftMain).textContent = 'km/h';
+    el('span', { fontSize: '8px', color: '#aeb7c4', marginLeft: '-4px', alignSelf: 'flex-end', marginBottom: '7px' }, tftMain).textContent = 'km/h';
     const cockpitGearBox = el(
       'div',
       {
-        width: '50px',
-        marginLeft: '8px',
+        width: '39px',
+        marginLeft: '6px',
         color: '#fff',
         border: '2px solid #c9152b',
         borderRadius: '5px',
@@ -291,13 +293,13 @@ export class Hud {
     ).textContent = 'AUTO';
     this.cockpitGear = el(
       'div',
-      { fontSize: '31px', fontWeight: '900', lineHeight: '31px' },
+      { fontSize: '24px', fontWeight: '900', lineHeight: '24px' },
       cockpitGearBox,
     );
     this.cockpitGear.textContent = 'N';
     const tftRpmTrack = el(
       'div',
-      { height: '8px', margin: '7px 9px 0', background: '#202833', borderRadius: '2px', overflow: 'hidden' },
+      { height: '5px', margin: '6px 7px 0', background: '#202833', borderRadius: '2px', overflow: 'hidden' },
       this.cockpitTft,
     );
     this.cockpitRpm = el('div', { width: '0%', height: '100%', background: '#f4f7fb' }, tftRpmTrack);
@@ -435,6 +437,7 @@ export class Hud {
       : 'NO COMPLETED LAPS';
     this.cameraMode.textContent = snap.cameraMode;
     this.cockpitTft.style.display = snap.cameraMode === 'RIDER VIEW' ? 'block' : 'none';
+    this.speedCluster.style.display = snap.cameraMode === 'RIDER VIEW' ? 'none' : 'block';
     this.cockpitSpeed.textContent = String(Math.round(Math.max(0, snap.speedKph)));
     this.cockpitGear.textContent = gear;
     this.cockpitRpm.style.width = `${rpmPct.toFixed(1)}%`;

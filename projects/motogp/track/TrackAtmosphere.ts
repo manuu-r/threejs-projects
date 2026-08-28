@@ -16,6 +16,7 @@ export const TRACKSIDE_AD_SLOTS = [
 // branches. Keep the inventory API, but do not render placements until they
 // are authored against named sockets on the real Nürburgring scene.
 const ENABLE_LEGACY_GENERATED_PLACEMENTS = false;
+const ENABLE_VERIFIED_PIT_STRAIGHT_PLACEMENTS = true;
 
 export interface TrackAtmosphere {
   root: THREE.Group;
@@ -32,6 +33,10 @@ export function createTrackAtmosphere(track: TrackData): TrackAtmosphere {
     buildAdHoardings(root, track, disposables);
     buildCrowd(root, track, disposables);
   }
+  if (ENABLE_VERIFIED_PIT_STRAIGHT_PLACEMENTS) {
+    buildPitStraightSigns(root, track, disposables);
+    buildPitStraightCrowd(root, track, disposables);
+  }
   root.userData.adInventory = TRACKSIDE_AD_SLOTS.map((slot) => slot.id);
 
   return {
@@ -41,6 +46,114 @@ export function createTrackAtmosphere(track: TrackData): TrackAtmosphere {
       for (const item of disposables) item.dispose();
     },
   };
+}
+
+/** Signs only on the verified start/finish complex, safely beyond both verges. */
+function buildPitStraightSigns(
+  root: THREE.Group,
+  track: TrackData,
+  disposables: Array<{ dispose(): void }>,
+): void {
+  const geometry = new THREE.PlaneGeometry(4.8, 1.08);
+  const postGeometry = new THREE.BoxGeometry(0.065, 1.55, 0.065);
+  const postMaterial = new THREE.MeshStandardMaterial({ color: 0x27313a, metalness: 0.76, roughness: 0.34 });
+  const start = track.json.startSampleIndex;
+  const target = new THREE.Vector3();
+  const dummy = new THREE.Object3D();
+  const postTransforms: THREE.Matrix4[] = [];
+  disposables.push(geometry, postGeometry, postMaterial);
+
+  for (let board = 0; board < 8; board++) {
+    const sample = track.samples[(start - 50 + board * 14 + track.count) % track.count]!;
+    const side = board % 2 === 0 ? 1 : -1;
+    const edge = side > 0 ? sample.bl : sample.br;
+    const lateral = side * (edge + 19.5);
+    const x = sample.p[0] + sample.n[0] * lateral;
+    const z = sample.p[2] + sample.n[2] * lateral;
+    const slot = TRACKSIDE_AD_SLOTS[board % TRACKSIDE_AD_SLOTS.length]!;
+    const texture = createAdTexture(slot.label, slot.background, slot.foreground);
+    const material = new THREE.MeshStandardMaterial({
+      map: texture,
+      roughness: 0.36,
+      metalness: 0.04,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = `AdSlot:${slot.id}:PitStraight:Near`;
+    target.set(sample.p[0], sample.p[1] + 2.05, sample.p[2]);
+    mesh.castShadow = true;
+    const lod = new THREE.LOD();
+    lod.name = `AdSlot:${slot.id}:PitStraight`;
+    lod.position.set(x, sample.p[1] + 2.05, z);
+    lod.lookAt(target);
+    lod.addLevel(mesh, 0);
+    // At broadcast-scale distances the board occupies less than a pixel; the
+    // empty far level avoids material/texture work without visible popping.
+    lod.addLevel(new THREE.Object3D(), 380);
+    root.add(lod);
+    disposables.push(texture, material);
+
+    for (const along of [-1.8, 1.8]) {
+      dummy.position.set(
+        x + sample.t[0] * along,
+        sample.p[1] + 0.78,
+        z + sample.t[2] * along,
+      );
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      postTransforms.push(dummy.matrix.clone());
+    }
+  }
+  const posts = new THREE.InstancedMesh(postGeometry, postMaterial, postTransforms.length);
+  posts.name = 'PitStraightAdPosts';
+  for (let i = 0; i < postTransforms.length; i++) posts.setMatrixAt(i, postTransforms[i]!);
+  posts.instanceMatrix.needsUpdate = true;
+  posts.castShadow = true;
+  root.add(posts);
+}
+
+function buildPitStraightCrowd(
+  root: THREE.Group,
+  track: TrackData,
+  disposables: Array<{ dispose(): void }>,
+): void {
+  const geometry = new THREE.CapsuleGeometry(0.15, 0.7, 2, 5);
+  const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.86, vertexColors: true });
+  const crowd = new THREE.InstancedMesh(geometry, material, 132);
+  crowd.name = 'PitStraightInstancedCrowd';
+  const palette = [0xf2f4f8, 0xca1728, 0x1b2639, 0xf0c541, 0x71cce4];
+  const start = track.json.startSampleIndex;
+  const dummy = new THREE.Object3D();
+  let instance = 0;
+  for (let step = -52; step <= 52; step += 4) {
+    const sample = track.samples[(start + step + track.count) % track.count]!;
+    for (const side of [-1, 1]) {
+      const edge = side > 0 ? sample.bl : sample.br;
+      for (let row = 0; row < 2; row++) {
+        if (instance >= crowd.count) break;
+        const jitter = hash01(step * 37 + row * 11 + side * 101);
+        const lateral = side * (edge + 23 + row * 0.58 + jitter * 0.3);
+        dummy.position.set(
+          sample.p[0] + sample.n[0] * lateral + sample.t[0] * (jitter - 0.5) * 1.7,
+          sample.p[1] + 0.55 + row * 0.46,
+          sample.p[2] + sample.n[2] * lateral + sample.t[2] * (jitter - 0.5) * 1.7,
+        );
+        dummy.rotation.set(0, Math.atan2(-sample.n[0] * side, -sample.n[2] * side), 0);
+        dummy.scale.setScalar(0.9 + jitter * 0.16);
+        dummy.updateMatrix();
+        crowd.setMatrixAt(instance, dummy.matrix);
+        crowd.setColorAt(instance, new THREE.Color(palette[instance % palette.length]!));
+        instance++;
+      }
+    }
+  }
+  crowd.count = instance;
+  crowd.instanceMatrix.needsUpdate = true;
+  if (crowd.instanceColor) crowd.instanceColor.needsUpdate = true;
+  crowd.castShadow = false;
+  root.add(crowd);
+  disposables.push(geometry, material);
 }
 
 function buildAdHoardings(

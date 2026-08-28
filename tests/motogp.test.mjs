@@ -30,17 +30,23 @@ test("server-renders the MotoGP time trial route", async () => {
   assert.match(html, /Jolt Physics/i);
 });
 
-test("ships the baked Ducati/rider assembly and downloaded GP circuit", async () => {
-  const [bike, venue] = await Promise.all([
+test("ships the baked Ducati/rider assembly, cockpit forearms and downloaded GP circuit", async () => {
+  const [bike, cockpitArms, venue] = await Promise.all([
     readFile(new URL("public/motogp/ducati-rider-game-rig.glb", projectRoot)),
+    readFile(new URL("public/motogp/ducati-rider-cockpit-arms.glb", projectRoot)),
     readFile(new URL("public/motogp/nurburgring-gp.glb", projectRoot)),
     access(new URL("public/motogp/track-collision.json", projectRoot)),
   ]);
   assert.ok(bike.length > 20_000_000, "baked Ducati and rider must retain the supplied detail");
+  assert.ok(cockpitArms.length > 500_000, "cockpit view must ship textured forearms, not glove cutouts");
   assert.ok(venue.length > 20_000_000, "downloaded circuit venue must ship with the game");
   const jsonChunkLength = bike.readUInt32LE(12);
   const gltf = JSON.parse(bike.subarray(20, 20 + jsonChunkLength).toString("utf8").trimEnd());
   assert.ok(gltf.materials.length >= 30, "race bike must retain its authored materials");
+  const armsJsonLength = cockpitArms.readUInt32LE(12);
+  const armsGltf = JSON.parse(cockpitArms.subarray(20, 20 + armsJsonLength).toString("utf8").trimEnd());
+  assert.ok(armsGltf.nodes.some((node) => /Marc93_Rider_Arms_Cockpit/.test(node.name ?? "")));
+  assert.ok(armsGltf.extensionsUsed.includes("EXT_texture_webp"), "cockpit textures must stay compressed");
 });
 
 test("uses the Marc Marquez Ducati assembly and keeps unsafe generated ads disabled", async () => {
@@ -64,6 +70,7 @@ test("recovers against the authored asphalt instead of a synthetic world floor",
     readFile(new URL("public/motogp/nurburgring-asphalt-collision.json", projectRoot), "utf8"),
   ]);
   assert.match(runtimeSource, /queryAsphaltSurface/);
+  assert.match(runtimeSource, /queryPlayableSurface/);
   assert.match(runtimeSource, /lastSafeRoad/);
   assert.doesNotMatch(physicsSource, /deep recovery floor/i);
   const collision = JSON.parse(collisionSource);
@@ -80,6 +87,8 @@ test("recovers against the authored asphalt instead of a synthetic world floor",
   }
   assert.match(physicsSource, /frictionForRole/);
   assert.match(physicsSource, /case 'gravel'/);
+  assert.match(physicsSource, /garageApron/);
+  assert.match(physicsSource, /PLAYABLE_ROLES/);
 });
 
 test("removes the accidental legacy bike and hardens driveable track materials", async () => {
@@ -87,7 +96,12 @@ test("removes the accidental legacy bike and hardens driveable track materials",
     new URL("projects/motogp/track/TrackVisuals.ts", projectRoot),
     "utf8",
   );
-  assert.match(visualsSource, /EXCLUDED_VENUE_OBJECTS = new Set\(\['a\.001'\]\)/);
+  assert.match(visualsSource, /EXCLUDED_VENUE_OBJECTS/);
+  assert.match(visualsSource, /'a\.001'/);
+  assert.match(visualsSource, /'Object_28'/);
+  assert.match(visualsSource, /'Object_29'/);
+  assert.match(visualsSource, /'Object_31'/);
+  assert.match(visualsSource, /'Object_56'/);
   assert.match(visualsSource, /DRIVEABLE_SURFACES/);
   assert.match(visualsSource, /material\.transparent = false/);
   assert.match(visualsSource, /material\.map\.anisotropy/);
@@ -101,6 +115,45 @@ test("ships explicit rear chase and rider camera modes", async () => {
   assert.match(cameraSource, /mode: 'rear' \| 'rider' = 'rear'/);
   assert.match(cameraSource, /REAR CHASE/);
   assert.match(cameraSource, /RIDER VIEW/);
+  assert.match(cameraSource, /rigidly chassis-local/);
+  assert.match(cameraSource, /this\.posSmoothed\.copy\(this\.tmpB\)/);
+  assert.doesNotMatch(cameraSource, /riderFollow/);
+});
+
+test("uses an ACES, IBL and restrained post-processing pipeline", async () => {
+  const rendererSource = await readFile(
+    new URL("projects/motogp/render/Renderer.ts", projectRoot),
+    "utf8",
+  );
+  assert.match(rendererSource, /ACESFilmicToneMapping/);
+  assert.match(rendererSource, /SRGBColorSpace/);
+  assert.match(rendererSource, /PMREMGenerator/);
+  assert.match(rendererSource, /scene\.environment =/);
+  assert.match(rendererSource, /SSAOPass/);
+  assert.match(rendererSource, /UnrealBloomPass/);
+  assert.match(rendererSource, /SMAAPass/);
+  assert.match(rendererSource, /VSMShadowMap/);
+});
+
+test("adds tiled track micro-detail and bounded speed effects", async () => {
+  const [visualsSource, surfaceSource, speedSource, atmosphereSource] = await Promise.all([
+    readFile(new URL("projects/motogp/track/TrackVisuals.ts", projectRoot), "utf8"),
+    readFile(new URL("projects/motogp/track/TrackSurfaceDetails.ts", projectRoot), "utf8"),
+    readFile(new URL("projects/motogp/render/SpeedEffects.ts", projectRoot), "utf8"),
+    readFile(new URL("projects/motogp/track/TrackAtmosphere.ts", projectRoot), "utf8"),
+  ]);
+  assert.match(visualsSource, /material\.normalMap/);
+  assert.match(visualsSource, /material\.roughnessMap/);
+  assert.match(visualsSource, /material\.aoMap/);
+  assert.match(visualsSource, /RepeatWrapping/);
+  assert.match(surfaceSource, /RacingLineWear/);
+  assert.match(surfaceSource, /BakedTyreMark/);
+  assert.match(speedSource, /WheelMotionBlur/);
+  assert.match(speedSource, /DynamicTyreMarks/);
+  assert.match(speedSource, /surfaceDistance > 0\.65/);
+  assert.doesNotMatch(speedSource, /throttle > 0\.82/);
+  assert.match(atmosphereSource, /new THREE\.InstancedMesh/);
+  assert.match(atmosphereSource, /new THREE\.LOD/);
 });
 
 test("maps left and right input to the expected motorcycle turn direction", async () => {

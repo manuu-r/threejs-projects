@@ -151,12 +151,14 @@ export const CAMERA = {
   fovAtSpeedMps: 90,
   maxBankDeg: 8,
   riderNear: 0.025,
-  /** Measured against the baked cockpit-hand bounds in the Blender rig. */
-  riderHeight: 0.48,
-  riderLongitudinalOffset: 0.14,
-  riderLookVerticalOffset: -1.5,
-  riderFovBaseDeg: 78,
-  riderFovMaxDeg: 84,
+  /** Helmet anchor measured against the baked cockpit-arm bounds. */
+  riderHeight: 0.9,
+  riderLongitudinalOffset: -0.22,
+  riderLookVerticalOffset: -4.2,
+  riderFovBaseDeg: 86,
+  /** A restrained speed FOV shift; position never changes with throttle. */
+  riderFovMaxDeg: 88,
+  riderVibrationM: 0.0045,
 } as const;
 
 export const RESPAWN = {

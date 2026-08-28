@@ -14,15 +14,18 @@ import {
   loadAsphaltCollision,
   nearestAsphaltPoint,
   queryAsphaltSurface,
+  queryPlayableSurface,
 } from './track/TrackPhysics';
 import { loadTrackVisuals } from './track/TrackVisuals';
 import { createTrackAtmosphere } from './track/TrackAtmosphere';
+import { createTrackSurfaceDetails } from './track/TrackSurfaceDetails';
 import { Checkpoints } from './track/Checkpoints';
 import { LapTimer } from './timing/LapTimer';
 import { BestLapStore } from './timing/BestLapStore';
 import { ENGINE, PHYSICS } from './config';
 import { EngineSound } from './audio/EngineSound';
 import { CinematicSlowMotion } from './game/CinematicSlowMotion';
+import { SpeedEffects } from './render/SpeedEffects';
 
 /**
  * Bootstrap: loading screen -> physics init -> circuit build -> game loop.
@@ -42,8 +45,16 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
   const STEER_TEST = params.has('steertest');
   /** `?autodrive&speedtest`: straight-line acceleration then closed-throttle coast. */
   const SPEED_TEST = params.has('speedtest');
-  const AUTO_STEPS_PER_FRAME = 200; // 3.33 s of sim per frame
-  const AUTO_SIM_LIMIT_SEC = SPEED_TEST ? 24 : STEER_TEST ? 8 : 420;
+  /** `?autodrive&braketest`: accelerate, then apply a full straight-line brake. */
+  const BRAKE_TEST = params.has('braketest');
+  /** Rendered verification keeps the real scene visible while the bot drives. */
+  const AUTO_RENDER = params.has('render');
+  /** Dev-only pit/garage grounding probe. */
+  const GARAGE_TEST = params.has('garagetest');
+  /** Dev-only grass/run-off grounding probe. */
+  const OFFROAD_TEST = params.has('offroadtest');
+  const AUTO_STEPS_PER_FRAME = AUTO_RENDER ? 1 : 200; // real-time vs headless fast-forward
+  const AUTO_SIM_LIMIT_SEC = SPEED_TEST ? 24 : BRAKE_TEST ? 14 : STEER_TEST ? 8 : 420;
 
   container.replaceChildren();
   const loading = new LoadingScreen(container);
@@ -57,9 +68,11 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
   const track = await TrackData.load();
   const asphalt = await loadAsphaltCollision();
   buildTrackPhysics(world, track, asphalt);
-  await loadTrackVisuals(renderer3d.scene);
+  const trackVisuals = await loadTrackVisuals(renderer3d.scene);
   const atmosphere = createTrackAtmosphere(track);
   renderer3d.scene.add(atmosphere.root);
+  const surfaceDetails = createTrackSurfaceDetails(track);
+  renderer3d.scene.add(surfaceDetails.root);
 
   const controls = new Controls();
   const engineSound = new EngineSound();
@@ -68,17 +81,34 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
   // Resolve the grid anchor vertically against the authored surface. The GLB
   // contains stacked terrain and tarmac, so the centerline elevation is needed
   // to choose the visible road rather than the lower terrain shell.
-  const spawnRoad = nearestAsphaltPoint(asphalt, spawn.x, spawn.y, spawn.z);
-  const bike = new Bike(world, spawnRoad, spawn.yaw);
+  const pitGrid = track.samples[track.json.startSampleIndex]!;
+  const testLateral = GARAGE_TEST ? -24 : OFFROAD_TEST ? 15 : null;
+  const testX = testLateral === null ? spawn.x : pitGrid.p[0] + pitGrid.n[0] * testLateral;
+  const testZ = testLateral === null ? spawn.z : pitGrid.p[2] + pitGrid.n[2] * testLateral;
+  const testSurface = queryPlayableSurface(asphalt, testX, pitGrid.p[1], testZ);
+  const defaultSpawnRoad = nearestAsphaltPoint(asphalt, spawn.x, spawn.y, spawn.z);
+  const spawnRoad = testLateral === null
+    ? defaultSpawnRoad
+    : { x: testX, y: testSurface.y + 0.035, z: testZ };
+  const spawnYaw = testLateral === null ? spawn.yaw : Math.atan2(pitGrid.t[0], pitGrid.t[2]);
+  const bike = new Bike(world, spawnRoad, spawnYaw);
   renderer3d.scene.add(bike.root);
   // Do not render the procedural fallback for a frame while the large Ducati
   // asset streams in. It remains available only if the GLB genuinely fails.
   loading.setText('Loading Ducati and rider…');
   await bike.ready;
+  bike.settleSuspension();
+  const speedEffects = new SpeedEffects(bike);
+  renderer3d.scene.add(speedEffects.root);
 
   const chase = new ChaseCamera(renderer3d.camera);
   bike.syncVisuals();
   chase.snap(bike.root.position); // no first-frame camera lerp across the map
+  // Deterministic visual-QA entry point; ordinary players still toggle with C.
+  if (params.has('rider')) {
+    chase.toggleMode();
+    bike.setRiderVisible(false);
+  }
 
   // --- timing / rules ---------------------------------------------------------
   const bestLapStore = new BestLapStore();
@@ -91,6 +121,8 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
   const intent = controls.intent;
 
   let paused = false;
+  let disposed = false;
+  let autoTimer: number | null = null;
   /** Scaled physics time; deliberately separate from the race clock below. */
   let simTimeSec = 0;
   /** Unscaled fixed-step time keeps lap timing correct during crash slow motion. */
@@ -104,9 +136,13 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
   const bikeFwd = new THREE.Vector3();
   const bikeUp = new THREE.Vector3(0, 1, 0);
   const crashRiderPos = new THREE.Vector3();
-  let lastSafeRoad = { x: spawnRoad.x, y: spawnRoad.y, z: spawnRoad.z, yaw: spawn.yaw };
+  let lastSafeRoad = OFFROAD_TEST
+    ? { x: defaultSpawnRoad.x, y: defaultSpawnRoad.y, z: defaultSpawnRoad.z, yaw: spawn.yaw }
+    : { x: spawnRoad.x, y: spawnRoad.y, z: spawnRoad.z, yaw: spawnYaw };
   const safeRoadHistory = [lastSafeRoad];
   let nextSafePoseSampleSec = 0;
+  let lastSurfaceDistance = 0;
+  let lastSurfaceY = spawnRoad.y;
 
   // Autopilot corner-speed plan: per-sample target speed from local curvature
   // (v = sqrt(aLat / curvature)), capped to the straight-line pace.
@@ -149,20 +185,24 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
     // Read directly from Jolt. Visual root transforms update only once per
     // rendered frame and were too stale to protect a fast-moving bike.
     const uprightDot = bike.getPhysicsPoseInto(bikePos, bikeFwd);
-    const surface = queryAsphaltSurface(asphalt, bikePos.x, bikePos.y, bikePos.z);
+    const roadSurface = queryAsphaltSurface(asphalt, bikePos.x, bikePos.y, bikePos.z);
+    const surface = queryPlayableSurface(asphalt, bikePos.x, bikePos.y, bikePos.z);
+    lastSurfaceDistance = roadSurface.horizontalDistance;
+    lastSurfaceY = surface.y;
     const heightAboveSurface = bikePos.y - surface.y;
+    const heightAboveRoad = bikePos.y - roadSurface.y;
     const securelyOnAsphalt =
-      surface.horizontalDistance < 0.12 &&
-      heightAboveSurface > 0.25 &&
-      heightAboveSurface < 1.8 &&
+      roadSurface.horizontalDistance < 0.12 &&
+      heightAboveRoad > 0.25 &&
+      heightAboveRoad < 1.8 &&
       uprightDot > 0.78 &&
       bike.telemetry.wheelContacts[0] &&
       bike.telemetry.wheelContacts[1];
     if (securelyOnAsphalt && simTimeSec >= nextSafePoseSampleSec) {
       safeRoadHistory.push({
-        x: surface.x,
-        y: surface.y,
-        z: surface.z,
+        x: roadSurface.x,
+        y: roadSurface.y,
+        z: roadSurface.z,
         yaw: Math.atan2(bikeFwd.x, bikeFwd.z),
       });
       if (safeRoadHistory.length > 8) safeRoadHistory.shift();
@@ -197,12 +237,20 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
     }
 
     // Auto-respawn watchdog.
-    let needsRespawn = false;
-    if (!STEER_TEST && !bike.telemetry.crashed) needsRespawn = respawnMonitor.update(dt, simTimeSec, {
-      uprightDot,
-      surfaceDistance: surface.horizontalDistance,
-      heightAboveSurface,
-    });
+    const outsideWorld =
+      !Number.isFinite(surface.horizontalDistance) ||
+      surface.horizontalDistance > 35 ||
+      heightAboveSurface < -0.9 ||
+      (roadSurface.horizontalDistance < 18 && heightAboveRoad < -0.45) ||
+      bikePos.y < 3;
+    let needsRespawn = !STEER_TEST && outsideWorld;
+    if (!needsRespawn && !STEER_TEST && !bike.telemetry.crashed) {
+      needsRespawn = respawnMonitor.update(dt, simTimeSec, {
+        uprightDot,
+        surfaceDistance: surface.horizontalDistance,
+        heightAboveSurface,
+      });
+    }
     if (needsRespawn) {
       if (AUTO) console.log(`[lap] auto-respawn @${simTimeSec.toFixed(2)}s`);
       doRespawn(false);
@@ -213,6 +261,7 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
     // Headless virtual time fast-forwards TIMERS, not rAF (which fires only a
     // handful of times), so the autopilot drives the sim from a timer chain.
     const autoTick = (): void => {
+      if (disposed) return;
       if (simTimeSec >= AUTO_SIM_LIMIT_SEC) {
         console.log(`[auto] done t=${simTimeSec.toFixed(1)}s`);
         return;
@@ -245,20 +294,21 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
         },
         performance.now(),
       );
-      setTimeout(autoTick, 0);
+      autoTimer = window.setTimeout(autoTick, AUTO_RENDER ? 1000 / PHYSICS.fixedHz : 0);
     };
-    setTimeout(autoTick, 0);
+    autoTimer = window.setTimeout(autoTick, 0);
   } else {
     clock.onFixedStep = fixedStep;
   }
 
   /** Pure-pursuit + curvature speed plan along the centerline (verification only). */
   function autodrive(): void {
-    if (SPEED_TEST) {
+    if (SPEED_TEST || BRAKE_TEST) {
       // The grid straight is long enough to demonstrate an upshift, followed
       // by a meaningful in-gear coast before its braking zone.
-      intent.throttle = simTimeSec < 9.5 ? 1 : 0;
-      intent.brake = 0;
+      const accelerationEnd = BRAKE_TEST ? 7.2 : 9.5;
+      intent.throttle = simTimeSec < accelerationEnd ? 1 : 0;
+      intent.brake = BRAKE_TEST && simTimeSec >= accelerationEnd && simTimeSec < 10.5 ? 1 : 0;
       intent.steer = 0;
       if (simTimeSec >= steerLogNext) {
         steerLogNext += 0.25;
@@ -364,8 +414,9 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
     bikeFwd.set(0, 0, 1).applyQuaternion(bike.root.quaternion).normalize();
     bikeUp.set(0, 1, 0).applyQuaternion(bike.root.quaternion).normalize();
 
-    // Autopilot runs skip rendering — headless verification only needs the HUD DOM.
-    if (!AUTO) {
+    // Ordinary autopilot runs skip rendering; `&render` is the rider-camera
+    // regression harness used to verify hard acceleration at real speed.
+    if (!AUTO || AUTO_RENDER) {
       if (bike.telemetry.crashed && bike.getCrashRiderPositionInto(crashRiderPos)) {
         chase.updateCrash(frameDt, bikePos, bikeFwd, crashRiderPos, bike.telemetry.impactSeverity);
       } else {
@@ -379,6 +430,17 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
         );
       }
       renderer3d.trackSunOn({ x: bikePos.x, y: bikePos.y, z: bikePos.z });
+      speedEffects.update(
+        frameDt,
+        bikePos,
+        bikeFwd,
+        bike.telemetry.speedKph / 3.6,
+        intent.throttle,
+        intent.brake,
+        lastSurfaceDistance,
+        lastSurfaceY,
+      );
+      renderer3d.setSpeedEffect(bike.telemetry.speedKph / 3.6);
       renderer3d.render();
     }
     engineSound.update(
@@ -423,11 +485,17 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
   loading.hide();
 
   return () => {
+    disposed = true;
+    if (autoTimer !== null) window.clearTimeout(autoTimer);
     clock.stop();
     controls.dispose();
     engineSound.dispose();
     hud.dispose();
     atmosphere.dispose();
+    surfaceDetails.dispose();
+    speedEffects.dispose();
+    (trackVisuals.userData.disposeRealismMaps as (() => void) | undefined)?.();
+    trackVisuals.removeFromParent();
     bike.dispose();
     world.dispose();
     renderer3d.dispose();

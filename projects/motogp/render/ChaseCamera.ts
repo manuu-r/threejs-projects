@@ -18,9 +18,12 @@ export class ChaseCamera {
   private fovCurrent = CAMERA.fovBaseDeg;
   private bankCurrent = 0;
   private crashOrbit = 0;
+  private riderVibrationTime = 0;
+  private snapOnNextUpdate = false;
   private tmpA = new THREE.Vector3();
   private tmpB = new THREE.Vector3();
   private tmpC = new THREE.Vector3();
+  private tmpD = new THREE.Vector3();
 
   constructor(camera: THREE.PerspectiveCamera) {
     this.camera = camera;
@@ -28,6 +31,9 @@ export class ChaseCamera {
 
   toggleMode(): void {
     this.mode = this.mode === 'rear' ? 'rider' : 'rear';
+    // Never interpolate through a third-person position when entering the
+    // helmet camera. That transition was briefly exposing the complete bike.
+    this.snapOnNextUpdate = true;
   }
 
   get modeLabel(): string {
@@ -59,21 +65,41 @@ export class ChaseCamera {
     const kLook = 1 - Math.exp(-CAMERA.lookSmoothing * dt);
 
     if (this.mode === 'rider') {
-      // Visor-mounted camera follows the bike's real up axis so hands, wrists,
-      // tank, and horizon lean as one connected cockpit instead of floating.
-      this.tmpA
+      // Helmet transform is rigidly chassis-local. There is deliberately no
+      // follow lag: acceleration cannot leave the camera behind the bike, and
+      // a wheelie cannot rotate the cockpit out of frame. Physics interpolation
+      // already supplies the only smoothing this view needs.
+      this.tmpA.copy(bikeFwd).normalize();
+      this.tmpD.copy(bikeUp).normalize();
+      this.tmpC.crossVectors(this.tmpD, this.tmpA).normalize();
+      this.tmpB
         .copy(bikePos)
-        .addScaledVector(bikeUp, CAMERA.riderHeight)
-        .addScaledVector(bikeFwd, CAMERA.riderLongitudinalOffset);
-      const riderFollow = 1 - Math.exp(-18 * dt);
-      this.posSmoothed.lerp(this.tmpA, riderFollow);
-      cam.position.copy(this.posSmoothed);
-      this.tmpB.copy(bikePos).addScaledVector(bikeFwd, 11);
-      this.tmpB.addScaledVector(bikeUp, CAMERA.riderLookVerticalOffset);
-      this.lookSmoothed.lerp(this.tmpB, 1 - Math.exp(-20 * dt));
-      cam.up.copy(bikeUp);
+        .addScaledVector(this.tmpD, CAMERA.riderHeight)
+        .addScaledVector(this.tmpA, CAMERA.riderLongitudinalOffset);
+      this.posSmoothed.copy(this.tmpB);
+
+      this.tmpB
+        .copy(this.posSmoothed)
+        .addScaledVector(this.tmpA, 11)
+        .addScaledVector(this.tmpD, CAMERA.riderLookVerticalOffset);
+      this.lookSmoothed.copy(this.tmpB);
+      this.snapOnNextUpdate = false;
+
+      // Sub-millimetric helmet vibration communicates speed without changing
+      // the camera's riding position or revealing more of the motorcycle.
+      this.riderVibrationTime += dt;
+      const vibration = THREE.MathUtils.clamp((speedMps - 16) / 72, 0, 1) * CAMERA.riderVibrationM;
+      cam.position
+        .copy(this.posSmoothed)
+        .addScaledVector(this.tmpC, Math.sin(this.riderVibrationTime * 47) * vibration)
+        .addScaledVector(this.tmpD, Math.sin(this.riderVibrationTime * 71) * vibration * 0.45);
+      cam.up.copy(this.tmpD);
       cam.lookAt(this.lookSmoothed);
-      const riderFov = Math.min(CAMERA.riderFovMaxDeg, CAMERA.riderFovBaseDeg + speedMps * 0.07);
+      const riderFov = THREE.MathUtils.lerp(
+        CAMERA.riderFovBaseDeg,
+        CAMERA.riderFovMaxDeg,
+        THREE.MathUtils.clamp(speedMps / 90, 0, 1),
+      );
       if (cam.near !== CAMERA.riderNear) {
         cam.near = CAMERA.riderNear;
         cam.updateProjectionMatrix();

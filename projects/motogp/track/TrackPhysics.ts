@@ -20,7 +20,10 @@ export interface AsphaltCollisionData {
 }
 
 const GRID_CELL_SIZE = 25;
-const spatialIndexes = new WeakMap<AsphaltCollisionData, Map<string, number[]>>();
+const ASPHALT_ROLES = new Set(['asphalt']);
+const PLAYABLE_ROLES = new Set(['asphalt', 'curb', 'gravel', 'terrain', 'verge', 'paving']);
+const asphaltSpatialIndexes = new WeakMap<AsphaltCollisionData, Map<string, number[]>>();
+const playableSpatialIndexes = new WeakMap<AsphaltCollisionData, Map<string, number[]>>();
 
 export async function loadAsphaltCollision(
   url = '/motogp/nurburgring-asphalt-collision.json',
@@ -37,7 +40,8 @@ export async function loadAsphaltCollision(
   ) {
     throw new Error('invalid Nürburgring asphalt collision mesh');
   }
-  spatialIndexes.set(data, buildSpatialIndex(data));
+  asphaltSpatialIndexes.set(data, buildSpatialIndex(data, ASPHALT_ROLES));
+  playableSpatialIndexes.set(data, buildSpatialIndex(data, PLAYABLE_ROLES));
   return data;
 }
 
@@ -49,7 +53,7 @@ export async function loadAsphaltCollision(
  */
 export function buildTrackPhysics(
   world: PhysicsWorld,
-  _track: TrackData,
+  track: TrackData,
   asphalt: AsphaltCollisionData,
 ): void {
   // Do not add a second, artificial floor below the venue. A bike that left
@@ -76,6 +80,30 @@ export function buildTrackPhysics(
       restitution: 0,
     });
   }
+
+  // The supplied collision export stops at the pit-lane apron even though the
+  // rendered garages continue farther back. Extend only that verified
+  // start/finish service area with an invisible, upward-wound paving plane so
+  // the player can enter the garage bays without falling through the venue.
+  const grid = track.samples[track.json.startSampleIndex]!;
+  const back = 150;
+  const inner = -6;
+  const outer = -42;
+  const point = (along: number, lateral: number): [number, number, number] => [
+    grid.p[0] + grid.t[0] * along + grid.n[0] * lateral,
+    grid.p[1] - 0.035,
+    grid.p[2] + grid.t[2] * along + grid.n[2] * lateral,
+  ];
+  const garageApron = [
+    ...point(-back, inner),
+    ...point(-back, outer),
+    ...point(back, outer),
+    ...point(back, inner),
+  ];
+  world.addStaticMesh(garageApron, [0, 1, 2, 0, 2, 3], {
+    friction: SURFACES.pavingFriction,
+    restitution: 0,
+  });
 
   world.optimizeBroadPhase();
 }
@@ -152,6 +180,30 @@ export function queryAsphaltSurface(
   y: number,
   z: number,
 ): AsphaltSurfaceHit {
+  return querySurface(asphalt, x, y, z, asphaltSpatialIndexes, ASPHALT_ROLES);
+}
+
+/**
+ * Closest authored rideable surface, including pit paving and run-off. This is
+ * used for grounding/recovery; barrier walls are deliberately excluded.
+ */
+export function queryPlayableSurface(
+  asphalt: AsphaltCollisionData,
+  x: number,
+  y: number,
+  z: number,
+): AsphaltSurfaceHit {
+  return querySurface(asphalt, x, y, z, playableSpatialIndexes, PLAYABLE_ROLES);
+}
+
+function querySurface(
+  asphalt: AsphaltCollisionData,
+  x: number,
+  y: number,
+  z: number,
+  indexes: WeakMap<AsphaltCollisionData, Map<string, number[]>>,
+  roles: ReadonlySet<string>,
+): AsphaltSurfaceHit {
   const { vertices, triangles } = asphalt;
   let bestScore = Infinity;
   let bestX = x;
@@ -159,7 +211,7 @@ export function queryAsphaltSurface(
   let bestZ = z;
   let bestHorizontalSq = Infinity;
 
-  for (const i of candidateTriangleOffsets(asphalt, x, z)) {
+  for (const i of candidateTriangleOffsets(asphalt, x, z, indexes, roles)) {
     const ai = triangles[i]! * 3;
     const bi = triangles[i + 1]! * 3;
     const ci = triangles[i + 2]! * 3;
@@ -262,14 +314,21 @@ export function nearestAsphaltPoint(
   return { x: road.x, y: road.y + 0.035, z: road.z };
 }
 
-function buildSpatialIndex(asphalt: AsphaltCollisionData): Map<string, number[]> {
+function buildSpatialIndex(
+  asphalt: AsphaltCollisionData,
+  roles: ReadonlySet<string>,
+): Map<string, number[]> {
   const index = new Map<string, number[]>();
   const { vertices, triangles } = asphalt;
-  const asphaltPart = asphalt.parts?.find((part) => part.role === 'asphalt');
-  const firstTriangle = asphaltPart ? asphaltPart.triangleOffset : 0;
-  const triangleCount = asphaltPart ? asphaltPart.triangleCount : triangles.length / 3;
-  const endTriangle = firstTriangle + triangleCount;
-  for (let triangleIndex = firstTriangle; triangleIndex < endTriangle; triangleIndex++) {
+  const triangleIndexes = asphalt.parts?.length
+    ? asphalt.parts
+      .filter((part) => roles.has(part.role))
+      .flatMap((part) => Array.from(
+        { length: part.triangleCount },
+        (_, i) => part.triangleOffset + i,
+      ))
+    : Array.from({ length: triangles.length / 3 }, (_, i) => i);
+  for (const triangleIndex of triangleIndexes) {
     const i = triangleIndex * 3;
     let minX = Infinity;
     let maxX = -Infinity;
@@ -304,11 +363,13 @@ function candidateTriangleOffsets(
   asphalt: AsphaltCollisionData,
   x: number,
   z: number,
+  indexes: WeakMap<AsphaltCollisionData, Map<string, number[]>>,
+  roles: ReadonlySet<string>,
 ): readonly number[] {
-  let index = spatialIndexes.get(asphalt);
+  let index = indexes.get(asphalt);
   if (!index) {
-    index = buildSpatialIndex(asphalt);
-    spatialIndexes.set(asphalt, index);
+    index = buildSpatialIndex(asphalt, roles);
+    indexes.set(asphalt, index);
   }
   const cellX = Math.floor(x / GRID_CELL_SIZE);
   const cellZ = Math.floor(z / GRID_CELL_SIZE);
@@ -328,10 +389,13 @@ function candidateTriangleOffsets(
     }
     if (nearby.length) return nearby;
   }
-  const asphaltPart = asphalt.parts?.find((part) => part.role === 'asphalt');
-  const firstTriangle = asphaltPart ? asphaltPart.triangleOffset : 0;
-  const triangleCount = asphaltPart
-    ? asphaltPart.triangleCount
-    : asphalt.triangles.length / 3;
-  return Array.from({ length: triangleCount }, (_, i) => (firstTriangle + i) * 3);
+  if (asphalt.parts?.length) {
+    return asphalt.parts
+      .filter((part) => roles.has(part.role))
+      .flatMap((part) => Array.from(
+        { length: part.triangleCount },
+        (_, i) => (part.triangleOffset + i) * 3,
+      ));
+  }
+  return Array.from({ length: asphalt.triangles.length / 3 }, (_, i) => i * 3);
 }

@@ -10,6 +10,7 @@ import {
   DIFFERENTIAL,
   ENGINE,
   LEAN,
+  PHYSICS,
   STEERING,
   TRANSMISSION,
   TYRES,
@@ -67,6 +68,7 @@ export class Bike {
   private fwdTmp = { x: 0, y: 0, z: 0 };
   private riderVisual: THREE.Object3D | null = null;
   private riderCockpitHands: THREE.Object3D | null = null;
+  private riderCockpitArms: THREE.Object3D | null = null;
   private riderVisible = true;
   private readonly crashDetector = new CrashDetector();
   private vehicleConstraintAttached = true;
@@ -149,6 +151,19 @@ export class Bike {
     this.ready = this.loadModel();
   }
 
+  /** Preload suspension behind the loading screen so the bike never drops from a floating pose. */
+  settleSuspension(durationSec = 0.42): void {
+    this.controller.SetDriverInput(0, 0, 1, 0);
+    const steps = Math.ceil(durationSec * PHYSICS.fixedHz);
+    for (let i = 0; i < steps; i++) this.world.step(1 / PHYSICS.fixedHz);
+    const zero = new this.Jolt.Vec3(0, 0, 0);
+    this.world.bodyInterface.SetLinearAndAngularVelocity(this.bodyId, zero, zero);
+    this.Jolt.destroy(zero);
+    this.controller.SetDriverInput(0, 0, 0, 0);
+    this.hasPhysicsPose = false;
+    this.syncVisuals();
+  }
+
   /**
    * Swap the fallback for the single Blender-authored Ducati + rider assembly.
    * Blender already established the real-world scale, forward axis and rider
@@ -156,28 +171,47 @@ export class Bike {
    */
   private async loadModel(): Promise<void> {
     try {
-      const gltf = await new GLTFLoader().loadAsync('/motogp/ducati-rider-game-rig.glb');
+      const loader = new GLTFLoader();
+      const gltf = await loader.loadAsync('/motogp/ducati-rider-game-rig.glb');
       gltf.scene.traverse((obj) => {
         if (!(obj instanceof THREE.Mesh)) return;
         obj.castShadow = true;
         obj.receiveShadow = true;
+        this.enhanceBikeMaterial(obj);
       });
 
       const mount = new THREE.Group();
       mount.name = 'MarcMarquez93Ducati';
       // Physics root is the chassis centre; the Blender assembly is ground-based.
-      mount.position.set(0, -0.74, 0);
+      // Seat the authored tyre contact patches on the physics wheel plane.
+      // The prior visual offset left a thin daylight gap beneath both tyres.
+      mount.position.set(0, -0.755, 0);
       mount.add(gltf.scene);
       this.riderVisual = gltf.scene.getObjectByName('Marc93_Rider_Baked_Final') ?? null;
       this.riderCockpitHands = gltf.scene.getObjectByName('Marc93_Rider_Hands_Cockpit') ?? null;
+      try {
+        const cockpit = await loader.loadAsync('/motogp/ducati-rider-cockpit-arms.glb');
+        cockpit.scene.name = 'Marc93CockpitArmsAssembly';
+        cockpit.scene.traverse((obj) => {
+          if (!(obj instanceof THREE.Mesh)) return;
+          obj.castShadow = true;
+          obj.receiveShadow = true;
+          this.enhanceBikeMaterial(obj);
+        });
+        this.riderCockpitArms = cockpit.scene;
+        gltf.scene.add(cockpit.scene);
+      } catch (error) {
+        // Keep the older glove-only shell as a fallback if the small cockpit
+        // asset is unavailable in a development build.
+        console.warn('[MotoGP] Cockpit arms asset unavailable; using glove fallback.', error);
+      }
       if (this.riderVisual) {
         this.riderHomeParent = this.riderVisual.parent;
         this.riderHomePosition.copy(this.riderVisual.position);
         this.riderHomeQuaternion.copy(this.riderVisual.quaternion);
         this.riderHomeScale.copy(this.riderVisual.scale);
       }
-      if (this.riderVisual) this.riderVisual.visible = this.riderVisible;
-      if (this.riderCockpitHands) this.riderCockpitHands.visible = !this.riderVisible;
+      this.updateRiderVisibility();
 
       this.placeholderBody.removeFromParent();
       for (const wheel of this.wheelMeshes) wheel.visible = false;
@@ -190,8 +224,109 @@ export class Bike {
   /** Rider view swaps the body shell for the baked gloves gripping the clip-ons. */
   setRiderVisible(visible: boolean): void {
     this.riderVisible = visible;
-    if (this.riderVisual) this.riderVisual.visible = this.telemetry.crashed || visible;
-    if (this.riderCockpitHands) this.riderCockpitHands.visible = !this.telemetry.crashed && !visible;
+    this.updateRiderVisibility();
+  }
+
+  private updateRiderVisibility(): void {
+    const cockpitView = !this.telemetry.crashed && !this.riderVisible;
+    if (this.riderVisual) this.riderVisual.visible = this.telemetry.crashed || this.riderVisible;
+    if (this.riderCockpitArms) this.riderCockpitArms.visible = cockpitView;
+    if (this.riderCockpitHands) {
+      this.riderCockpitHands.visible = cockpitView && this.riderCockpitArms === null;
+    }
+  }
+
+  /** Preserve authored albedo while giving the Ducati physically plausible response. */
+  private enhanceBikeMaterial(mesh: THREE.Mesh): void {
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const enhanced = materials.map((source) => {
+      let material = source;
+      if (!(material instanceof THREE.MeshStandardMaterial)) return material;
+      const name = material.name.toLowerCase();
+      const rider = /rider|ch20_body/.test(`${mesh.name} ${name}`.toLowerCase());
+      const fairing = !rider && /motogp|ducati|021615/.test(name);
+      if (fairing && !(material instanceof THREE.MeshPhysicalMaterial)) {
+        material = this.toPhysicalFairing(material);
+      }
+      if (material.map) {
+        material.map.colorSpace = THREE.SRGBColorSpace;
+        material.map.anisotropy = Math.max(material.map.anisotropy, 12);
+      }
+      if (material.normalMap) material.normalMap.colorSpace = THREE.NoColorSpace;
+      if (material.roughnessMap) material.roughnessMap.colorSpace = THREE.NoColorSpace;
+      if (material.metalnessMap) material.metalnessMap.colorSpace = THREE.NoColorSpace;
+      if (material.aoMap) material.aoMap.colorSpace = THREE.NoColorSpace;
+
+      const metal = /metal|silver|bolt|fork|chain|rearset|velg/.test(name);
+      const carbon = /carbon/.test(name);
+      const rubber = /tyre|tire|rubber|wheelfront1mtl|wheelrear0061mtl/.test(name);
+      if (rider) {
+        material.metalness = 0;
+        material.roughness = 0.6;
+      } else if (metal) {
+        material.metalness = Math.max(material.metalness, 0.82);
+        material.roughness = THREE.MathUtils.clamp(material.roughness, 0.18, 0.38);
+      } else if (carbon) {
+        material.metalness = 0.18;
+        material.roughness = 0.3;
+      } else if (rubber) {
+        material.metalness = 0;
+        material.roughness = 0.88;
+      } else if (fairing) {
+        material.metalness = Math.max(material.metalness, 0.08);
+        material.roughness = Math.min(material.roughness, 0.28);
+      }
+      material.envMapIntensity = rider ? 0.52 : metal ? 1.65 : fairing ? 1.35 : 1.0;
+      material.needsUpdate = true;
+      return material;
+    });
+    mesh.material = Array.isArray(mesh.material) ? enhanced : enhanced[0]!;
+  }
+
+  private toPhysicalFairing(source: THREE.MeshStandardMaterial): THREE.MeshPhysicalMaterial {
+    const material = new THREE.MeshPhysicalMaterial({
+      name: source.name,
+      color: source.color,
+      map: source.map,
+      lightMap: source.lightMap,
+      lightMapIntensity: source.lightMapIntensity,
+      aoMap: source.aoMap,
+      aoMapIntensity: source.aoMapIntensity,
+      emissive: source.emissive,
+      emissiveIntensity: source.emissiveIntensity,
+      emissiveMap: source.emissiveMap,
+      bumpMap: source.bumpMap,
+      bumpScale: source.bumpScale,
+      normalMap: source.normalMap,
+      normalScale: source.normalScale,
+      displacementMap: source.displacementMap,
+      displacementScale: source.displacementScale,
+      displacementBias: source.displacementBias,
+      roughness: Math.min(source.roughness, 0.28),
+      roughnessMap: source.roughnessMap,
+      metalness: Math.max(source.metalness, 0.08),
+      metalnessMap: source.metalnessMap,
+      alphaMap: source.alphaMap,
+      envMap: source.envMap,
+      envMapIntensity: 1.35,
+      transparent: source.transparent,
+      opacity: source.opacity,
+      alphaTest: source.alphaTest,
+      side: source.side,
+      depthTest: source.depthTest,
+      depthWrite: source.depthWrite,
+      clearcoat: 0.82,
+      clearcoatRoughness: 0.17,
+      sheen: 0.08,
+      sheenRoughness: 0.5,
+      sheenColor: new THREE.Color(0x8f1018),
+    });
+    material.vertexColors = source.vertexColors;
+    material.flatShading = source.flatShading;
+    material.polygonOffset = source.polygonOffset;
+    material.polygonOffsetFactor = source.polygonOffsetFactor;
+    material.polygonOffsetUnits = source.polygonOffsetUnits;
+    return material;
   }
 
   /**
@@ -622,6 +757,7 @@ export class Bike {
     this.root.parent.attach(this.riderVisual);
     this.riderVisual.visible = true;
     if (this.riderCockpitHands) this.riderCockpitHands.visible = false;
+    if (this.riderCockpitArms) this.riderCockpitArms.visible = false;
 
     this.crashBodyMatrix.compose(center, rotation, this.crashScale);
     this.riderCrashRelative.copy(this.crashBodyMatrix).invert().multiply(visualWorld);
@@ -687,7 +823,10 @@ export class Bike {
       this.riderVisual.scale.copy(this.riderHomeScale);
       this.riderVisual.visible = this.riderVisible;
     }
-    if (this.riderCockpitHands) this.riderCockpitHands.visible = !this.riderVisible;
+    if (this.riderCockpitArms) this.riderCockpitArms.visible = !this.riderVisible;
+    if (this.riderCockpitHands) {
+      this.riderCockpitHands.visible = !this.riderVisible && this.riderCockpitArms === null;
+    }
   }
 
   private detachVehicleConstraint(): void {
