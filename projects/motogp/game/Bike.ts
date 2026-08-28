@@ -72,6 +72,9 @@ export class Bike {
   private riderVisible = true;
   /** GLTF materials are shared by many primitives; finish each source once. */
   private readonly enhancedMaterials = new WeakMap<THREE.Material, THREE.Material>();
+  private leatherMicroMap: THREE.CanvasTexture | null = null;
+  private carbonMicroMap: THREE.CanvasTexture | null = null;
+  private readonly liveryResources: Array<{ dispose(): void }> = [];
   private readonly crashDetector = new CrashDetector();
   private vehicleConstraintAttached = true;
   private riderCrashBodyId: BodyID | null = null;
@@ -190,6 +193,7 @@ export class Bike {
         obj.receiveShadow = true;
         this.enhanceBikeMaterial(obj);
       });
+      this.finishDucatiTailCowl(gltf.scene);
 
       const mount = new THREE.Group();
       mount.name = 'MarcMarquez93Ducati';
@@ -201,6 +205,9 @@ export class Bike {
       mount.add(gltf.scene);
       this.riderVisual = gltf.scene.getObjectByName('Marc93_Rider_Baked_Final') ?? null;
       this.riderCockpitHands = gltf.scene.getObjectByName('Marc93_Rider_Hands_Cockpit') ?? null;
+      this.addRiderRaceHump();
+      this.addMarc93BackMarking();
+      this.addDucatiTailBadge(gltf.scene);
       try {
         const cockpit = await loader.loadAsync('/motogp/ducati-rider-cockpit-arms.glb');
         cockpit.scene.name = 'Marc93CockpitArmsAssembly';
@@ -248,7 +255,56 @@ export class Bike {
     }
   }
 
-  /** Preserve authored albedo while giving the Ducati physically plausible response. */
+  /**
+   * The supplied tail is split across a painted cowl, upper shell and lower
+   * undertray. Give those exact meshes dedicated finishes after the shared
+   * material pass so pale shared textures cannot wash the rear assembly out.
+   */
+  private finishDucatiTailCowl(sceneRoot: THREE.Object3D): void {
+    const parts: Array<{ names: string[]; finish: 'paint' | 'carbon' }> = [
+      { names: ['Object_34001', 'Object_34.001', 'Object_34'], finish: 'paint' },
+      { names: ['Object_38001', 'Object_38.001', 'Object_38'], finish: 'paint' },
+      { names: ['Object_40001', 'Object_40.001', 'Object_40'], finish: 'carbon' },
+    ];
+    for (const part of parts) {
+      const object = part.names.map((name) => sceneRoot.getObjectByName(name)).find(Boolean);
+      if (!(object instanceof THREE.Mesh)) continue;
+      const sources = Array.isArray(object.material) ? object.material : [object.material];
+      const finished = sources.map((source) => {
+        if (!(source instanceof THREE.MeshStandardMaterial)) return source;
+        const material = source.clone();
+        material.map = null;
+        material.metalness = 0;
+        if (part.finish === 'paint') {
+          material.name = 'DucatiCorseTailClearcoat';
+          material.color.set(0x920018);
+          material.roughness = 0.16;
+          material.envMapIntensity = 1.42;
+          if (material instanceof THREE.MeshPhysicalMaterial) {
+            material.clearcoat = 1;
+            material.clearcoatRoughness = 0.105;
+          }
+        } else {
+          material.name = 'DucatiCorseTailCarbonUndertray';
+          material.color.set(0x171a1e);
+          material.roughness = 0.3;
+          material.envMapIntensity = 0.92;
+          material.bumpMap = this.getCarbonMicroMap();
+          material.bumpScale = 0.004;
+          if (material instanceof THREE.MeshPhysicalMaterial) {
+            material.clearcoat = 0.58;
+            material.clearcoatRoughness = 0.24;
+          }
+        }
+        material.needsUpdate = true;
+        this.liveryResources.push(material);
+        return material;
+      });
+      object.material = Array.isArray(object.material) ? finished : finished[0]!;
+    }
+  }
+
+  /** Preserve the authored livery while separating its real-world finishes. */
   private enhanceBikeMaterial(mesh: THREE.Mesh): void {
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     const enhanced = materials.map((source) => {
@@ -260,19 +316,26 @@ export class Bike {
         return material;
       }
       const name = material.name.toLowerCase();
-      const rider = /rider|ch20_body/.test(`${mesh.name} ${name}`.toLowerCase());
-      const fairing = !rider && /motogp|ducati|021615|frontcolor|m_0020_red|mediumblue/.test(name);
-      const glass = /glass|windscreen|screen|visor|translucent/.test(name);
-      const carbon = /carbon/.test(name);
-      const rubber = /tyre|tire|rubber|wheelfront1mtl|wheelrear0061mtl/.test(name);
+      const identity = `${mesh.name} ${name}`.toLowerCase();
+      const rider = /rider|hands|arms|marc93|ch20_body/.test(identity);
+      const tailCowl = /object_34(?:\.001)?|frontcolor/.test(identity);
+      const seat = /carpet_plush_charcoal|\bseat\b/.test(identity);
+      const glass = /glass|windscreen|screen|visor|translucent/.test(name) ||
+        (material.transparent && material.opacity < 0.72);
+      const carbon = !rider && /carbon|mudguard002|motogpu00f915/.test(name);
+      const rubber = !rider && /tyre|tire|rubber|wheelfront1mtl|wheelrear0061mtl/.test(name);
+      const brakeMetal = /brake|disc|rotor|wheelfixedfront31/.test(name);
+      const darkRim = /velg|rim|wheelfixedfront21|wheelfront005/.test(name);
+      const warmMetal = /forcella1|forksrear00111/.test(name);
       const metal = !rubber && !carbon && !glass &&
         /metal|silver|bolt|fork|forcella|chain|rearset|velg|handlebars|wheelfixed|wheelfront00/.test(name);
-      const brushedMetal = metal && /brushed|fork|forcella|rearset|velg|handlebars/.test(name);
+      const fairing = !rider && !glass && !carbon &&
+        /motogpu|ducati|021615|frontcolor|m_0020_red|mediumblue/.test(name);
       if (!(material instanceof THREE.MeshPhysicalMaterial)) {
         if (glass) material = this.toPhysicalGlass(material);
-        else if (rider) material = this.toPhysicalRider(material);
+        else if (rider || seat) material = this.toPhysicalRider(material);
         else if (carbon) material = this.toPhysicalCarbon(material);
-        else if (brushedMetal) material = this.toPhysicalBrushedMetal(material);
+        else if (metal) material = this.toPhysicalBrushedMetal(material);
         else if (fairing) material = this.toPhysicalFairing(material);
       }
       if (material.map) {
@@ -285,38 +348,57 @@ export class Bike {
       if (material.aoMap) material.aoMap.colorSpace = THREE.NoColorSpace;
 
       if (glass) {
+        material.color.set(0x283442);
         material.metalness = 0;
-        material.roughness = 0.09;
-        material.envMapIntensity = 1.25;
+        material.roughness = 0.075;
+        material.envMapIntensity = 1.5;
       } else if (rider) {
+        // White is the neutral multiplier for the baked Marc 93 albedo. The
+        // old grey-red vertex tint made every part read as the same vinyl toy.
+        material.color.set(0xffffff);
         material.metalness = 0;
-        material.roughness = 0.56;
-        // The authored rider is a single baked texture containing helmet,
-        // leather and gloves. A restrained fabric sheen preserves the suit's
-        // weave while the clear layer keeps the helmet curvature readable.
-        material.envMapIntensity = 0.72;
+        material.roughness = 0.48;
+        material.envMapIntensity = 0.82;
+      } else if (seat) {
+        material.color.set(0x111419);
+        material.metalness = 0;
+        material.roughness = 0.76;
+        material.clearcoat = 0.08;
+        material.clearcoatRoughness = 0.62;
+        material.envMapIntensity = 0.42;
       } else if (metal) {
         material.metalness = Math.max(material.metalness, 0.92);
-        material.roughness = THREE.MathUtils.clamp(material.roughness, 0.22, 0.4);
+        material.roughness = brakeMetal ? 0.34 : darkRim ? 0.3 : 0.25;
+        if (!material.map) {
+          if (warmMetal) material.color.set(0xc9a45c);
+          else if (darkRim) material.color.set(0x171b20);
+          else if (brakeMetal) material.color.set(0xa8adb2);
+          else material.color.set(0x8e959d);
+        }
       } else if (carbon) {
         // Carbon fibre is a coated dielectric composite, not bare metal.
+        material.color.set(material.map ? 0xbfc3c7 : 0x24272b);
         material.metalness = 0;
-        material.roughness = 0.34;
-        material.color.multiplyScalar(0.84);
+        material.roughness = 0.31;
+        if (!material.bumpMap) material.bumpMap = this.getCarbonMicroMap();
+        material.bumpScale = 0.005;
       } else if (rubber) {
+        material.color.set(material.map ? 0x8a8e91 : 0x2d3033);
         material.metalness = 0;
-        material.roughness = 0.86;
-        // Real racing rubber is charcoal with a broad, dim highlight—not an
-        // absolute black hole. Slight albedo gain preserves the supplied tread.
-        material.color.multiplyScalar(1.08);
-        material.envMapIntensity = 0.32;
+        material.roughness = 0.82;
+        material.envMapIntensity = 0.28;
       } else if (fairing) {
         // Painted bodywork is a dielectric base beneath a glossy clear coat.
+        // The authored tail slot carries a pale base texture in the exported
+        // GLB, so the Ducati tint must win over the neutral texture multiplier.
+        material.color.set(tailCowl ? 0x920018 : material.map ? 0xffffff : 0xb90820);
         material.metalness = 0;
-        material.roughness = THREE.MathUtils.clamp(material.roughness, 0.22, 0.3);
-        // Slightly mute the baked game-model albedo so Ducati red reads as
-        // painted bodywork rather than emissive arcade red under daylight.
-        material.color.multiplyScalar(0.92);
+        material.roughness = tailCowl ? 0.16 : 0.205;
+        if (tailCowl) {
+          material.clearcoat = 1;
+          material.clearcoatRoughness = 0.105;
+          material.envMapIntensity = 1.42;
+        }
       }
       if (!rider && !rubber && !glass) {
         material.envMapIntensity = metal ? 1.35 : fairing || carbon ? 1.08 : 0.82;
@@ -328,54 +410,355 @@ export class Bike {
     });
     mesh.material = Array.isArray(mesh.material) ? enhanced : enhanced[0]!;
     if (/rider|hands|arms|marc93|ch20/i.test(mesh.name)) {
-      this.applyRiderColourZones(mesh, enhanced);
+      this.applyRiderMaterialZones(mesh, enhanced);
     }
   }
 
   /**
-   * The source rider uses one baked material for helmet, leather, gloves and
-   * boots. Neutral vertex multipliers restore material separation without
-   * painting over Marc's supplied 93 graphics or sponsor texture.
+   * The supplied rider is one baked mesh/material. Reorder triangles into
+   * physical finish zones so the UV livery stays intact while the helmet,
+   * leather and protective pieces react differently to light.
    */
-  private applyRiderColourZones(mesh: THREE.Mesh, materials: THREE.Material[]): void {
+  private applyRiderMaterialZones(mesh: THREE.Mesh, materials: THREE.Material[]): void {
+    if (materials.length !== 1) return;
+    const base = materials[0];
+    if (!(base instanceof THREE.MeshPhysicalMaterial)) return;
     const position = mesh.geometry.getAttribute('position');
     if (!position) return;
     if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
     const bounds = mesh.geometry.boundingBox;
     if (!bounds) return;
-    const colour = new Float32Array(position.count * 3);
     const spanY = Math.max(1e-4, bounds.max.y - bounds.min.y);
     const cockpitLimb = /hands|arms|cockpit/i.test(mesh.name);
+    const leather = base.clone();
+    leather.name = `${base.name}:race-leather`;
+    leather.color.set(0xf4eeee);
+    leather.roughness = cockpitLimb ? 0.42 : 0.48;
+    leather.clearcoat = 0.06;
+    leather.clearcoatRoughness = 0.42;
+    leather.sheen = 0.34;
+    leather.sheenRoughness = 0.72;
+    leather.sheenColor.set(0x8d1827);
+    if (!leather.bumpMap) leather.bumpMap = this.getLeatherMicroMap();
+    leather.bumpScale = 0.007;
+
+    const helmet = base.clone();
+    helmet.name = `${base.name}:ducati-red-helmet-shell`;
+    helmet.map = null;
+    helmet.color.set(0xb60920);
+    helmet.roughness = 0.12;
+    helmet.clearcoat = 0.96;
+    helmet.clearcoatRoughness = 0.07;
+    helmet.envMapIntensity = 1.28;
+    helmet.bumpMap = base.bumpMap;
+    helmet.vertexColors = false;
+
+    const visor = helmet.clone();
+    visor.name = `${base.name}:smoked-visor`;
+    visor.color.set(0x121a24);
+    visor.roughness = 0.055;
+    visor.clearcoat = 1;
+    visor.clearcoatRoughness = 0.035;
+    visor.envMapIntensity = 1.55;
+
+    const protective = base.clone();
+    protective.name = `${base.name}:gloves-boots`;
+    protective.color.set(0xd9d4d4);
+    protective.roughness = 0.37;
+    protective.clearcoat = 0.2;
+    protective.clearcoatRoughness = 0.3;
+    protective.envMapIntensity = 0.74;
+    if (!protective.bumpMap) protective.bumpMap = this.getLeatherMicroMap();
+    protective.bumpScale = 0.009;
+
+    if (cockpitLimb) {
+      mesh.material = [leather, protective];
+    } else {
+      mesh.material = [leather, helmet, visor, protective];
+    }
+
+    const liveryColour = new Float32Array(position.count * 3);
+    const spanZ = Math.max(1e-4, bounds.max.z - bounds.min.z);
     for (let i = 0; i < position.count; i++) {
       const height = (position.getY(i) - bounds.min.y) / spanY;
-      let r = 0.66;
-      let g = 0.51;
-      let b = 0.49;
+      const lateral = Math.abs(position.getX(i)) / Math.max(1e-4, Math.max(Math.abs(bounds.min.x), Math.abs(bounds.max.x)));
+      let r = 1;
+      let g = 0.96;
+      let b = 0.96;
       if (cockpitLimb) {
-        r = 0.64;
-        g = 0.49;
-        b = 0.47;
-      } else if (height > 0.73) {
-        // Helmet shell: cooler, darker and glossier through the same PBR map.
-        r = 0.62;
-        g = 0.64;
-        b = 0.68;
+        if (lateral > 0.68) {
+          r = 0.34;
+          g = 0.35;
+          b = 0.38;
+        }
       } else if (height < 0.27) {
-        // Boots and lower gloves should not glow as brightly as the suit.
-        r = 0.6;
-        g = 0.58;
-        b = 0.58;
+        r = 0.38;
+        g = 0.39;
+        b = 0.42;
+      } else if (height < 0.72 && height > 0.31 && lateral > 0.48) {
+        // Charcoal flank panels keep the Ducati-red centre visually narrow,
+        // like a tailored factory race suit instead of a one-colour jumpsuit.
+        r = 0.28;
+        g = 0.29;
+        b = 0.32;
       }
-      colour[i * 3] = r;
-      colour[i * 3 + 1] = g;
-      colour[i * 3 + 2] = b;
+      liveryColour[i * 3] = r;
+      liveryColour[i * 3 + 1] = g;
+      liveryColour[i * 3 + 2] = b;
     }
-    mesh.geometry.setAttribute('color', new THREE.Float32BufferAttribute(colour, 3));
-    for (const material of materials) {
-      if (!(material instanceof THREE.MeshStandardMaterial)) continue;
-      material.vertexColors = true;
-      material.needsUpdate = true;
+    mesh.geometry.setAttribute('color', new THREE.Float32BufferAttribute(liveryColour, 3));
+    leather.vertexColors = true;
+    protective.vertexColors = true;
+
+    const sourceIndex = mesh.geometry.getIndex();
+    const indices = sourceIndex
+      ? Array.from(sourceIndex.array)
+      : Array.from({ length: position.count }, (_, i) => i);
+    const buckets: number[][] = cockpitLimb ? [[], []] : [[], [], [], []];
+    const halfWidth = Math.max(Math.abs(bounds.min.x), Math.abs(bounds.max.x));
+    for (let tri = 0; tri + 2 < indices.length; tri += 3) {
+      const a = indices[tri]!;
+      const b = indices[tri + 1]!;
+      const c = indices[tri + 2]!;
+      const height = ((position.getY(a) + position.getY(b) + position.getY(c)) / 3 - bounds.min.y) / spanY;
+      const lateral = Math.abs((position.getX(a) + position.getX(b) + position.getX(c)) / 3);
+      let zone = 0;
+      if (cockpitLimb) zone = lateral > halfWidth * 0.68 ? 1 : 0;
+      else if (height > 0.76) {
+        const depth = ((position.getZ(a) + position.getZ(b) + position.getZ(c)) / 3 - bounds.min.z) / spanZ;
+        zone = depth > 0.72 ? 2 : 1;
+      } else if (height < 0.27 || (height < 0.58 && lateral > halfWidth * 0.7)) zone = 3;
+      buckets[zone]!.push(a, b, c);
     }
+    mesh.geometry.setIndex(buckets.flat());
+    mesh.geometry.clearGroups();
+    let groupStart = 0;
+    for (let zone = 0; zone < buckets.length; zone++) {
+      const count = buckets[zone]!.length;
+      if (count > 0) mesh.geometry.addGroup(groupStart, count, zone);
+      groupStart += count;
+    }
+  }
+
+  private getLeatherMicroMap(): THREE.CanvasTexture {
+    if (this.leatherMicroMap) return this.leatherMicroMap;
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#777';
+    ctx.fillRect(0, 0, 128, 128);
+    let seed = 93;
+    for (let i = 0; i < 1900; i++) {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      const x = seed & 127;
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      const y = seed & 127;
+      const shade = 104 + ((seed >>> 24) & 31);
+      ctx.fillStyle = `rgb(${shade},${shade},${shade})`;
+      ctx.fillRect(x, y, 1, 1);
+    }
+    this.leatherMicroMap = new THREE.CanvasTexture(canvas);
+    this.leatherMicroMap.name = 'Marc93LeatherMicroBump';
+    this.leatherMicroMap.colorSpace = THREE.NoColorSpace;
+    this.leatherMicroMap.wrapS = THREE.RepeatWrapping;
+    this.leatherMicroMap.wrapT = THREE.RepeatWrapping;
+    this.leatherMicroMap.repeat.set(22, 22);
+    return this.leatherMicroMap;
+  }
+
+  private getCarbonMicroMap(): THREE.CanvasTexture {
+    if (this.carbonMicroMap) return this.carbonMicroMap;
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#666';
+    ctx.fillRect(0, 0, 64, 64);
+    ctx.lineWidth = 2;
+    for (let offset = -64; offset < 128; offset += 8) {
+      ctx.strokeStyle = offset % 16 === 0 ? '#8b8b8b' : '#484848';
+      ctx.beginPath();
+      ctx.moveTo(offset, 0);
+      ctx.lineTo(offset + 64, 64);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(offset + 64, 0);
+      ctx.lineTo(offset, 64);
+      ctx.stroke();
+    }
+    this.carbonMicroMap = new THREE.CanvasTexture(canvas);
+    this.carbonMicroMap.name = 'DucatiCarbonTwillBump';
+    this.carbonMicroMap.colorSpace = THREE.NoColorSpace;
+    this.carbonMicroMap.wrapS = THREE.RepeatWrapping;
+    this.carbonMicroMap.wrapT = THREE.RepeatWrapping;
+    this.carbonMicroMap.repeat.set(18, 18);
+    return this.carbonMicroMap;
+  }
+
+  /** Teardrop aerodynamic protector fitted to the baked rider's upper spine. */
+  private addRiderRaceHump(): void {
+    if (!this.riderVisual) return;
+    const geometry = new THREE.SphereGeometry(1, 24, 18);
+    const position = geometry.getAttribute('position');
+    for (let i = 0; i < position.count; i++) {
+      const vertical = THREE.MathUtils.clamp((position.getY(i) + 1) * 0.5, 0, 1);
+      // MotoGP humps are broad at the shoulders and taper toward the lumbar
+      // spine; shaping the mesh avoids the stuck-on egg silhouette.
+      const taper = THREE.MathUtils.lerp(0.5, 1, THREE.MathUtils.smoothstep(vertical, 0.08, 0.84));
+      position.setX(i, position.getX(i) * taper);
+      position.setZ(i, position.getZ(i) * THREE.MathUtils.lerp(0.7, 1, vertical));
+    }
+    position.needsUpdate = true;
+    geometry.computeVertexNormals();
+    geometry.scale(9, 17, 7);
+    const material = new THREE.MeshPhysicalMaterial({
+      name: 'Marc93AerodynamicRaceHumpLeather',
+      color: 0xa9081d,
+      roughness: 0.32,
+      metalness: 0,
+      clearcoat: 0.16,
+      clearcoatRoughness: 0.28,
+      sheen: 0.3,
+      sheenRoughness: 0.68,
+      sheenColor: new THREE.Color(0x7d1523),
+      bumpMap: this.getLeatherMicroMap(),
+      bumpScale: 0.006,
+      envMapIntensity: 0.8,
+    });
+    const hump = new THREE.Mesh(geometry, material);
+    hump.name = 'Marc93AerodynamicRaceHump';
+    hump.position.set(0, 114, -2.5);
+    hump.rotation.x = 0.43;
+    hump.castShadow = true;
+    hump.receiveShadow = true;
+    this.riderVisual.add(hump);
+    this.liveryResources.push(geometry, material);
+  }
+
+  /** Small racewear-scale marking integrated into the aerodynamic hump. */
+  private addMarc93BackMarking(): void {
+    if (!this.riderVisual) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 384;
+    const ctx = canvas.getContext('2d')!;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.font = 'italic 900 228px Arial, sans-serif';
+    ctx.lineWidth = 30;
+    ctx.strokeStyle = '#11151c';
+    ctx.strokeText('93', 256, 190);
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = '#c70922';
+    ctx.strokeText('93', 256, 190);
+    ctx.fillStyle = '#f4f0e8';
+    ctx.fillText('93', 256, 190);
+    ctx.font = '800 27px Arial, sans-serif';
+    ctx.letterSpacing = '4px';
+    ctx.fillStyle = '#11151c';
+    ctx.fillText('DUCATI CORSE', 256, 57);
+    ctx.font = '700 24px Arial, sans-serif';
+    ctx.letterSpacing = '3px';
+    ctx.fillText('MARC MARQUEZ', 256, 327);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.name = 'Marc93RacewearBackMarking';
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 12;
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      alphaTest: 0.08,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
+    });
+    const geometry = new THREE.PlaneGeometry(20, 15);
+    // Rear chase sees the rider from local -Z; flip the plane itself so the
+    // double-sided texture never presents a mirrored 93.
+    geometry.rotateY(Math.PI);
+    const marking = new THREE.Mesh(geometry, material);
+    marking.name = 'Marc93SuitBackMarking';
+    // The baked torso leans forward sharply; sit just behind its rear surface
+    // (local -Z) and follow that rake so the marking reads as printed leather.
+    marking.position.set(0, 114, -15.5);
+    marking.rotation.x = 0.43;
+    marking.renderOrder = 6;
+    this.riderVisual.add(marking);
+    this.liveryResources.push(texture, material, geometry);
+  }
+
+  /**
+   * A small, paint-scale identity badge on the authored Ducati tail cowl.
+   * The cowl itself remains the supplied mesh; this decal is deliberately
+   * render-only so it cannot change the motorcycle's collision or handling.
+   */
+  private addDucatiTailBadge(sceneRoot: THREE.Object3D): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 288;
+    const ctx = canvas.getContext('2d')!;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.beginPath();
+    ctx.moveTo(74, 34);
+    ctx.lineTo(438, 34);
+    ctx.lineTo(470, 104);
+    ctx.lineTo(414, 245);
+    ctx.lineTo(256, 278);
+    ctx.lineTo(98, 245);
+    ctx.lineTo(42, 104);
+    ctx.closePath();
+    ctx.fillStyle = '#080b10';
+    ctx.fill();
+    ctx.lineWidth = 22;
+    ctx.strokeStyle = '#ba001f';
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.font = 'italic 900 184px Arial, sans-serif';
+    ctx.lineWidth = 22;
+    ctx.strokeStyle = '#ba001f';
+    ctx.strokeText('93', 256, 158);
+    ctx.fillStyle = '#f2eee5';
+    ctx.fillText('93', 256, 158);
+    ctx.font = '800 25px Arial, sans-serif';
+    ctx.letterSpacing = '4px';
+    ctx.fillText('DUCATI CORSE', 256, 52);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.name = 'DucatiCorseTail93Badge';
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 12;
+    const material = new THREE.MeshBasicMaterial({
+      name: 'DucatiCorseTail93BadgeMaterial',
+      map: texture,
+      transparent: true,
+      alphaTest: 0.08,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
+    });
+    const geometry = new THREE.PlaneGeometry(0.105, 0.059);
+    // Blender's rear-facing +Y surface imports as Three.js -Z.
+    geometry.rotateY(Math.PI);
+    const badge = new THREE.Mesh(geometry, material);
+    badge.name = 'DucatiCorseTail93Badge';
+    badge.position.set(0, 0.921, -0.507);
+    badge.renderOrder = 7;
+    sceneRoot.add(badge);
+    this.liveryResources.push(texture, material, geometry);
   }
 
   private toPhysicalFairing(source: THREE.MeshStandardMaterial): THREE.MeshPhysicalMaterial {
@@ -467,13 +850,14 @@ export class Bike {
   private toPhysicalRider(source: THREE.MeshStandardMaterial): THREE.MeshPhysicalMaterial {
     const material = this.toPhysicalFairing(source);
     material.metalness = 0;
-    material.roughness = 0.56;
-    material.clearcoat = 0.08;
-    material.clearcoatRoughness = 0.3;
-    material.sheen = 0.22;
-    material.sheenRoughness = 0.78;
-    material.sheenColor.set(0x7f252d);
-    material.specularIntensity = 0.58;
+    material.color.set(0xffffff);
+    material.roughness = 0.48;
+    material.clearcoat = 0.06;
+    material.clearcoatRoughness = 0.42;
+    material.sheen = 0.34;
+    material.sheenRoughness = 0.72;
+    material.sheenColor.set(0x8d1827);
+    material.specularIntensity = 0.62;
     return material;
   }
 
@@ -896,6 +1280,9 @@ export class Bike {
   dispose(): void {
     const { physicsSystem } = this.world;
     this.restoreRiderAfterCrash();
+    this.leatherMicroMap?.dispose();
+    this.carbonMicroMap?.dispose();
+    for (const resource of this.liveryResources) resource.dispose();
     if (this.stepListener && this.vehicleConstraintAttached) physicsSystem.RemoveStepListener(this.stepListener);
     if (this.vehicleConstraintAttached) physicsSystem.RemoveConstraint(this.constraint);
     this.world.destroyBody(this.bodyId);

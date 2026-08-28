@@ -66,6 +66,22 @@ test("uses the Marc Marquez Ducati assembly and keeps unsafe generated ads disab
   assert.match(bikeSource, /toPhysicalBrushedMetal/);
   assert.match(bikeSource, /toPhysicalGlass/);
   assert.match(bikeSource, /toPhysicalRider/);
+  assert.match(bikeSource, /applyRiderMaterialZones/);
+  assert.match(bikeSource, /Marc93LeatherMicroBump/);
+  assert.match(bikeSource, /DucatiCarbonTwillBump/);
+  assert.match(bikeSource, /helmet-shell/);
+  assert.match(bikeSource, /smoked-visor/);
+  assert.match(bikeSource, /factory race suit/);
+  assert.match(bikeSource, /Marc93SuitBackMarking/);
+  assert.match(bikeSource, /Marc93AerodynamicRaceHump/);
+  assert.match(bikeSource, /DucatiCorseTail93Badge/);
+  assert.match(bikeSource, /DucatiCorseTailClearcoat/);
+  assert.match(bikeSource, /DucatiCorseTailCarbonUndertray/);
+  assert.match(bikeSource, /object_34/);
+  assert.match(bikeSource, /tailCowl \? 0x920018/);
+  assert.match(bikeSource, /geometry\.rotateY\(Math\.PI\)/);
+  assert.match(bikeSource, /MARC MARQUEZ/);
+  assert.doesNotMatch(bikeSource, /applyRiderColourZones/);
   assert.match(bikeSource, /anisotropy = 0\.62/);
   assert.match(bikeSource, /transmission = 0\.52/);
   assert.match(runtimeSource, /await bike\.ready/);
@@ -182,6 +198,8 @@ test("ships explicit rear chase and rider camera modes", async () => {
   assert.match(cameraSource, /this\.posSmoothed\.copy\(this\.tmpB\)/);
   assert.doesNotMatch(cameraSource, /riderFollow/);
   assert.doesNotMatch(cameraSource, /riderVibrationTime/);
+  assert.match(cameraSource, /cornerOrbitMaxM/);
+  assert.match(cameraSource, /signedOrbit/);
 });
 
 test("uses an ACES, IBL and restrained post-processing pipeline", async () => {

@@ -113,15 +113,31 @@ export class ChaseCamera {
     const dist = CAMERA.baseDistance + CAMERA.distancePerSpeed * speedMps;
     const height = CAMERA.baseHeight + CAMERA.heightPerSpeed * speedMps;
 
-    // Desired position: behind on the horizontalized forward axis.
-    this.tmpA.set(bikeFwd.x, 0, bikeFwd.z);
-    if (this.tmpA.lengthSq() < 1e-4) this.tmpA.set(0, 0, 1);
-    this.tmpA.normalize().multiplyScalar(-dist);
-    const desiredX = bikePos.x + this.tmpA.x;
-    const desiredZ = bikePos.z + this.tmpA.z;
+    // Desired position: behind on the horizontalized forward axis. As the
+    // motorcycle leans, orbit gently toward the outside of the corner so the
+    // fairing flank becomes visible without moving the aiming point off-line.
+    this.tmpC.set(bikeFwd.x, 0, bikeFwd.z);
+    if (this.tmpC.lengthSq() < 1e-4) this.tmpC.set(0, 0, 1);
+    this.tmpC.normalize();
+    this.tmpA.copy(this.tmpC).multiplyScalar(-dist);
+    const leanMagnitude = THREE.MathUtils.smoothstep(
+      Math.abs(leanDeg),
+      CAMERA.cornerOrbitStartDeg,
+      CAMERA.cornerOrbitFullDeg,
+    );
+    const speedGate = THREE.MathUtils.smoothstep(
+      speedMps,
+      CAMERA.cornerOrbitMinSpeedMps,
+      CAMERA.cornerOrbitMinSpeedMps + 8,
+    );
+    const signedOrbit = -Math.sign(leanDeg) * leanMagnitude * speedGate * CAMERA.cornerOrbitMaxM;
+    const sideX = this.tmpC.z;
+    const sideZ = -this.tmpC.x;
+    const desiredX = bikePos.x + this.tmpA.x + sideX * signedOrbit;
+    const desiredZ = bikePos.z + this.tmpA.z + sideZ * signedOrbit;
 
     this.posSmoothed.x += (desiredX - this.posSmoothed.x) * kPos;
-    this.posSmoothed.y += (bikePos.y + height - this.posSmoothed.y) * kPos;
+    this.posSmoothed.y += (bikePos.y + height - leanMagnitude * speedGate * 0.1 - this.posSmoothed.y) * kPos;
     this.posSmoothed.z += (desiredZ - this.posSmoothed.z) * kPos;
     cam.position.copy(this.posSmoothed);
 

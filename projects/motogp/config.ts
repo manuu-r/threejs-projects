@@ -152,6 +152,11 @@ export const CAMERA = {
   fovMaxDeg: 70,
   fovAtSpeedMps: 90,
   maxBankDeg: 8,
+  /** Subtle outside-of-turn orbit that exposes the leaned Ducati's flank. */
+  cornerOrbitMaxM: 0.9,
+  cornerOrbitStartDeg: 5,
+  cornerOrbitFullDeg: 40,
+  cornerOrbitMinSpeedMps: 7,
   riderNear: 0.025,
   /** Helmet anchor measured against the baked cockpit-arm bounds. */
   riderHeight: 0.9,
