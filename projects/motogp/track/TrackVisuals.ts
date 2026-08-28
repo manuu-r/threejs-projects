@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 type SurfaceKind = 'asphalt' | 'kerb' | 'runoff' | 'gravel' | 'grass' | 'paving';
 
@@ -58,11 +59,19 @@ export async function loadTrackVisuals(
   root.traverse((obj) => {
     if (!(obj instanceof THREE.Mesh)) return;
     obj.receiveShadow = true;
+    // The bike, barriers and nearby procedural details cast into the moving
+    // shadow frustum. Rendering the venue's circuit-wide structure groups into
+    // it caused alternating frame-time spikes and no useful nearby shadow.
     obj.castShadow = false;
     obj.frustumCulled = true;
 
     const surface = DRIVEABLE_SURFACES.get(obj.name);
-    if (surface?.kind === 'asphalt') smoothCoincidentNormals(obj.geometry);
+    if (surface?.kind === 'asphalt') {
+      const exportedGeometry = obj.geometry;
+      obj.geometry = weldAsphaltGeometry(exportedGeometry);
+      exportedGeometry.dispose();
+      stabilizeAsphaltNormals(obj.geometry);
+    }
     const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
     for (const material of materials) {
       if (material instanceof THREE.MeshStandardMaterial) {
@@ -80,7 +89,7 @@ export async function loadTrackVisuals(
           material.polygonOffset = surface.kind === 'asphalt';
           material.polygonOffsetFactor = surface.kind === 'asphalt' ? -2 : 0;
           material.polygonOffsetUnits = surface.kind === 'asphalt' ? -4 : 0;
-          material.roughness = surface.roughness;
+          material.roughness = surface.kind === 'asphalt' ? 0.9 : surface.roughness;
           material.metalness = 0;
           const maps = detailMaps[surface.kind];
           if (surface.kind === 'asphalt') {
@@ -93,19 +102,23 @@ export async function loadTrackVisuals(
           // complete surface detail set with our world-planar maps so scale and
           // direction stay consistent across the whole ribbon.
           if (surface.kind === 'asphalt') {
-            // This particular road ribbon has discontinuous vertex normals at
-            // most triangulation edges. A tangent normal map exaggerates those
-            // edges even with planar UVs, so use planar height relief here.
+            // This ribbon is exported as individually split triangles. Any
+            // tangent-space bump/roughness/AO sampling makes those boundaries
+            // crawl as black lines at a racing-camera angle. Keep its stable
+            // planar albedo and scalar PBR response; geometry still supplies
+            // the real banking, grade and collision profile.
             material.normalMap = null;
-            material.bumpMap = maps.roughness;
-            material.bumpScale = 0.006;
+            material.bumpMap = null;
+            material.bumpScale = 0;
+            material.roughnessMap = null;
+            material.aoMap = null;
           } else {
             material.normalMap = maps.normal;
             material.normalScale.setScalar(0.38);
+            material.roughnessMap = maps.roughness;
+            material.aoMap = maps.ao;
           }
-          material.roughnessMap = maps.roughness;
-          material.aoMap = maps.ao;
-          material.aoMapIntensity = surface.kind === 'asphalt' ? 0.38 : 0.5;
+          material.aoMapIntensity = surface.kind === 'asphalt' ? 0.3 : 0.46;
           const position = obj.geometry.getAttribute('position');
           const planarUv = new Float32Array(position.count * 2);
           for (let i = 0; i < position.count; i++) {
@@ -135,7 +148,15 @@ export async function loadTrackVisuals(
         if (material.roughnessMap) material.roughnessMap.colorSpace = THREE.NoColorSpace;
         if (material.metalnessMap) material.metalnessMap.colorSpace = THREE.NoColorSpace;
         if (material.aoMap) material.aoMap.colorSpace = THREE.NoColorSpace;
-        material.envMapIntensity = surface?.kind === 'asphalt' ? 0.9 : surface ? 0.76 : 0.9;
+        // Dry road and vegetation have broad, subdued reflections; painted
+        // kerbs and architecture retain a little more sky response.
+        material.envMapIntensity = surface?.kind === 'asphalt'
+          ? 0.54
+          : surface?.kind === 'grass' || surface?.kind === 'gravel'
+            ? 0.38
+            : surface
+              ? 0.64
+              : 0.76;
         material.needsUpdate = true;
       }
     }
@@ -165,57 +186,36 @@ interface SurfaceMaps {
 }
 
 /**
- * The venue road is exported as split triangles, each with a slightly
- * different normal. Average normals for vertices occupying the same point so
- * daylight and AO do not reveal the underlying triangulation.
+ * The venue road is exported as isolated triangles with inconsistent normals.
+ * A uniform upward shading basis prevents their boundaries from flashing;
+ * the actual vertex positions still retain the circuit's grade and banking.
  */
-function smoothCoincidentNormals(geometry: THREE.BufferGeometry): void {
+function stabilizeAsphaltNormals(geometry: THREE.BufferGeometry): void {
   const position = geometry.getAttribute('position');
   if (!position) return;
-  const sums = new Map<string, THREE.Vector3>();
-  const face = new THREE.Vector3();
-  const a = new THREE.Vector3();
-  const b = new THREE.Vector3();
-  const c = new THREE.Vector3();
-  const ab = new THREE.Vector3();
-  const ac = new THREE.Vector3();
-  const key = (i: number): string =>
-    `${Math.round(position.getX(i) * 1000)},${Math.round(position.getY(i) * 1000)},${Math.round(position.getZ(i) * 1000)}`;
-  const addTriangle = (ia: number, ib: number, ic: number): void => {
-    a.fromBufferAttribute(position, ia);
-    b.fromBufferAttribute(position, ib);
-    c.fromBufferAttribute(position, ic);
-    ab.subVectors(b, a);
-    ac.subVectors(c, a);
-    face.crossVectors(ab, ac);
-    if (face.lengthSq() < 1e-12) return;
-    for (const i of [ia, ib, ic]) {
-      const vertexKey = key(i);
-      const sum = sums.get(vertexKey);
-      if (sum) sum.add(face);
-      else sums.set(vertexKey, face.clone());
-    }
-  };
-  const index = geometry.getIndex();
-  if (index) {
-    for (let i = 0; i < index.count; i += 3) {
-      addTriangle(index.getX(i), index.getX(i + 1), index.getX(i + 2));
-    }
-  } else {
-    for (let i = 0; i < position.count; i += 3) addTriangle(i, i + 1, i + 2);
-  }
   const normals = new Float32Array(position.count * 3);
-  const up = new THREE.Vector3(0, 1, 0);
   for (let i = 0; i < position.count; i++) {
-    const normal = sums.get(key(i))?.normalize() ?? up.clone();
-    // Suppress the exporter-created cross-track corrugation while retaining a
-    // small share of the broad banking/grade normal.
-    normal.lerp(up, 0.9).normalize();
-    normals[i * 3] = normal.x;
-    normals[i * 3 + 1] = normal.y;
-    normals[i * 3 + 2] = normal.z;
+    normals[i * 3] = 0;
+    normals[i * 3 + 1] = 1;
+    normals[i * 3 + 2] = 0;
   }
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+}
+
+/**
+ * Rebuild the visual road from position data alone and weld millimetric split
+ * vertices. Imported per-triangle UV/normal islands otherwise leave sub-pixel
+ * cracks that open and close as the camera advances. Collision is independent.
+ */
+function weldAsphaltGeometry(source: THREE.BufferGeometry): THREE.BufferGeometry {
+  const positionsOnly = new THREE.BufferGeometry();
+  positionsOnly.setAttribute('position', source.getAttribute('position').clone());
+  if (source.index) positionsOnly.setIndex(source.index.clone());
+  const welded = mergeVertices(positionsOnly, 0.002);
+  positionsOnly.dispose();
+  welded.computeBoundingBox();
+  welded.computeBoundingSphere();
+  return welded;
 }
 
 /** Compact tileable micro-detail maps layered over the venue's authored albedo. */
@@ -277,9 +277,13 @@ function createSurfaceMaps(seed: number, repeat: number, relief: number): Surfac
       normalData[i + 3] = 255;
       // Fresh race asphalt is dark grey, not crushed black. Retain enough
       // albedo for sunlight, tyre wear and contact shadows to remain legible.
-      const asphaltTone = Math.round(98 + (h - 0.5) * 24 + (hash(x * 7, y * 11) > 0.992 ? 16 : 0));
-      albedoData.set([asphaltTone, asphaltTone + 2, asphaltTone + 5, 255], i);
-      const rough = THREE.MathUtils.clamp(0.72 + (h - 0.5) * 0.34, 0, 1) * 255;
+      // Albedo carries only broad aggregate variation. Pixel-scale flecks turn
+      // into moving longitudinal streaks when minified at the camera's very
+      // shallow road angle, even with anisotropic filtering and mipmaps.
+      const macro = valueNoise(x, y, 64, 1) * 0.72 + valueNoise(x, y, 32, 4) * 0.28;
+      const asphaltTone = Math.round(92 + (macro - 0.5) * 14);
+      albedoData.set([asphaltTone, asphaltTone + 2, asphaltTone + 4, 255], i);
+      const rough = THREE.MathUtils.clamp(0.83 + (h - 0.5) * 0.22, 0, 1) * 255;
       roughData.set([rough, rough, rough, 255], i);
       const ao = THREE.MathUtils.clamp(0.86 + h * 0.14, 0, 1) * 255;
       aoData.set([ao, ao, ao, 255], i);

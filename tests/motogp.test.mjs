@@ -31,15 +31,17 @@ test("server-renders the MotoGP time trial route", async () => {
 });
 
 test("ships the baked Ducati/rider assembly, cockpit forearms and downloaded GP circuit", async () => {
-  const [bike, cockpitArms, venue] = await Promise.all([
+  const [bike, cockpitArms, venue, hoarding] = await Promise.all([
     readFile(new URL("public/motogp/ducati-rider-game-rig.glb", projectRoot)),
     readFile(new URL("public/motogp/ducati-rider-cockpit-arms.glb", projectRoot)),
     readFile(new URL("public/motogp/nurburgring-gp.glb", projectRoot)),
+    readFile(new URL("public/motogp/funny-hoarding-base.png", projectRoot)),
     access(new URL("public/motogp/track-collision.json", projectRoot)),
   ]);
   assert.ok(bike.length > 20_000_000, "baked Ducati and rider must retain the supplied detail");
   assert.ok(cockpitArms.length > 500_000, "cockpit view must ship textured forearms, not glove cutouts");
   assert.ok(venue.length > 20_000_000, "downloaded circuit venue must ship with the game");
+  assert.ok(hoarding.length > 100_000, "grandstand hoardings must ship their generated artwork");
   const jsonChunkLength = bike.readUInt32LE(12);
   const gltf = JSON.parse(bike.subarray(20, 20 + jsonChunkLength).toString("utf8").trimEnd());
   assert.ok(gltf.materials.length >= 30, "race bike must retain its authored materials");
@@ -59,8 +61,21 @@ test("uses the Marc Marquez Ducati assembly and keeps unsafe generated ads disab
   assert.match(bikeSource, /mount\.position\.set\(0, -0\.975, 0\)/);
   assert.match(bikeSource, /MarcMarquez93Ducati/);
   assert.match(bikeSource, /this\.ready = this\.loadModel\(\)/);
+  assert.match(bikeSource, /toPhysicalFairing/);
+  assert.match(bikeSource, /toPhysicalCarbon/);
+  assert.match(bikeSource, /toPhysicalBrushedMetal/);
+  assert.match(bikeSource, /toPhysicalGlass/);
+  assert.match(bikeSource, /toPhysicalRider/);
+  assert.match(bikeSource, /anisotropy = 0\.62/);
+  assert.match(bikeSource, /transmission = 0\.52/);
   assert.match(runtimeSource, /await bike\.ready/);
   assert.match(atmosphereSource, /TRACKSIDE_AD_SLOTS/);
+  assert.match(atmosphereSource, /BRAKE LATE/);
+  assert.match(atmosphereSource, /APEX\?/);
+  assert.match(atmosphereSource, /FULL SEND/);
+  assert.match(atmosphereSource, /Object_39_Frame/);
+  assert.match(atmosphereSource, /42\.2, 69\.2, -340\.25/);
+  assert.match(atmosphereSource, /funny-hoarding-base\.png/);
   assert.match(atmosphereSource, /ENABLE_LEGACY_GENERATED_PLACEMENTS = false/);
 });
 
@@ -166,6 +181,7 @@ test("ships explicit rear chase and rider camera modes", async () => {
   assert.match(cameraSource, /rigidly chassis-local/);
   assert.match(cameraSource, /this\.posSmoothed\.copy\(this\.tmpB\)/);
   assert.doesNotMatch(cameraSource, /riderFollow/);
+  assert.doesNotMatch(cameraSource, /riderVibrationTime/);
 });
 
 test("uses an ACES, IBL and restrained post-processing pipeline", async () => {
@@ -177,11 +193,14 @@ test("uses an ACES, IBL and restrained post-processing pipeline", async () => {
   assert.match(rendererSource, /SRGBColorSpace/);
   assert.match(rendererSource, /PMREMGenerator/);
   assert.match(rendererSource, /scene\.environment =/);
-  assert.match(rendererSource, /SSAOPass/);
-  assert.match(rendererSource, /UnrealBloomPass/);
+  assert.doesNotMatch(rendererSource, /SSAOPass/);
+  assert.doesNotMatch(rendererSource, /UnrealBloomPass/);
   assert.match(rendererSource, /SMAAPass/);
   assert.match(rendererSource, /PCFShadowMap/);
-  assert.match(rendererSource, /toneMappingExposure = 0\.57/);
+  assert.match(rendererSource, /toneMappingExposure = 0\.5/);
+  assert.match(rendererSource, /shadowTexel = 76 \/ 2048/);
+  assert.match(rendererSource, /renderPixelRatio/);
+  assert.match(rendererSource, /shadowRight/);
   assert.match(rendererSource, /rearFill/);
   assert.match(rendererSource, /shadowWeight/);
 });
@@ -197,17 +216,19 @@ test("adds tiled track micro-detail and bounded speed effects", async () => {
   assert.match(visualsSource, /material\.roughnessMap/);
   assert.match(visualsSource, /material\.aoMap/);
   assert.match(visualsSource, /RepeatWrapping/);
-  assert.match(visualsSource, /const asphaltTone = Math\.round\(98/);
-  assert.match(surfaceSource, /RacingLineWear/);
+  assert.match(visualsSource, /const asphaltTone = Math\.round\(92/);
+  assert.doesNotMatch(speedSource, /WheelMotionBlur/);
+  assert.doesNotMatch(speedSource, /DynamicTyreMarks/);
+  assert.doesNotMatch(surfaceSource, /RacingLineWear/);
   assert.match(surfaceSource, /BakedTyreMark/);
-  assert.match(speedSource, /WheelMotionBlur/);
-  assert.match(speedSource, /DynamicTyreMarks/);
+  assert.match(surfaceSource, /collision mesh remain untouched/);
   assert.match(speedSource, /surfaceDistance > 0\.65/);
   assert.match(speedSource, /createSoftParticleMap/);
   assert.match(speedSource, /createRadialGradient/);
   assert.doesNotMatch(speedSource, /throttle > 0\.82/);
   assert.match(atmosphereSource, /new THREE\.InstancedMesh/);
-  assert.match(atmosphereSource, /new THREE\.LOD/);
+  assert.match(atmosphereSource, /Object_39_Frame/);
+  assert.match(atmosphereSource, /42\.2, 69\.2, -340\.25/);
 });
 
 test("maps left and right input to the expected motorcycle turn direction", async () => {

@@ -18,7 +18,6 @@ export class ChaseCamera {
   private fovCurrent = CAMERA.fovBaseDeg;
   private bankCurrent = 0;
   private crashOrbit = 0;
-  private riderVibrationTime = 0;
   private snapOnNextUpdate = false;
   private tmpA = new THREE.Vector3();
   private tmpB = new THREE.Vector3();
@@ -71,7 +70,6 @@ export class ChaseCamera {
       // already supplies the only smoothing this view needs.
       this.tmpA.copy(bikeFwd).normalize();
       this.tmpD.copy(bikeUp).normalize();
-      this.tmpC.crossVectors(this.tmpD, this.tmpA).normalize();
       this.tmpB
         .copy(bikePos)
         .addScaledVector(this.tmpD, CAMERA.riderHeight)
@@ -85,14 +83,10 @@ export class ChaseCamera {
       this.lookSmoothed.copy(this.tmpB);
       this.snapOnNextUpdate = false;
 
-      // Sub-millimetric helmet vibration communicates speed without changing
-      // the camera's riding position or revealing more of the motorcycle.
-      this.riderVibrationTime += dt;
-      const vibration = THREE.MathUtils.clamp((speedMps - 16) / 72, 0, 1) * CAMERA.riderVibrationM;
-      cam.position
-        .copy(this.posSmoothed)
-        .addScaledVector(this.tmpC, Math.sin(this.riderVibrationTime * 47) * vibration)
-        .addScaledVector(this.tmpD, Math.sin(this.riderVibrationTime * 71) * vibration * 0.45);
+      // Keep helmet view geometrically locked. Engine-frequency camera shake
+      // sampled differently at 60/90/120 Hz and appeared as frame flicker;
+      // speed is conveyed by restrained FOV and optical motion instead.
+      cam.position.copy(this.posSmoothed);
       cam.up.copy(this.tmpD);
       cam.lookAt(this.lookSmoothed);
       const riderFov = THREE.MathUtils.lerp(

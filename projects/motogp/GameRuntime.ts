@@ -79,6 +79,8 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
   buildVenueObstaclePhysics(world, trackVisuals, asphalt);
   const atmosphere = createTrackAtmosphere(track);
   renderer3d.scene.add(atmosphere.root);
+  // Authored once in world space: these marks belong to the circuit and never
+  // spawn underneath or travel with the player's motorcycle.
   const surfaceDetails = createTrackSurfaceDetails(track);
   renderer3d.scene.add(surfaceDetails.root);
 
@@ -120,7 +122,7 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
   loading.setText('Loading Ducati and rider…');
   await bike.ready;
   bike.settleSuspension();
-  const speedEffects = new SpeedEffects(bike);
+  const speedEffects = new SpeedEffects();
   renderer3d.scene.add(speedEffects.root);
 
   const chase = new ChaseCamera(renderer3d.camera);

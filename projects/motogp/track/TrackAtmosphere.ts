@@ -7,9 +7,9 @@ import type { TrackData } from './TrackData';
  * touching placement or game logic.
  */
 export const TRACKSIDE_AD_SLOTS = [
-  { id: 'primary', label: 'YOUR BRAND', background: '#e8f7ff', foreground: '#101722' },
-  { id: 'partner', label: 'RACE PARTNER', background: '#e32636', foreground: '#ffffff' },
-  { id: 'event', label: 'TRACKSIDE', background: '#77d8ef', foreground: '#101722' },
+  { id: 'brake-late', label: 'BRAKE LATE.\nBLAME THE TYRES.', background: '#f4f0e9', foreground: '#111318' },
+  { id: 'apex', label: 'APEX?\nNEVER MET HER.', background: '#f4f0e9', foreground: '#111318' },
+  { id: 'full-send', label: 'FULL SEND.\nHALF TALENT.', background: '#f4f0e9', foreground: '#111318' },
 ] as const;
 
 // The supplied venue and the legacy generated timing line diverge on several
@@ -34,7 +34,7 @@ export function createTrackAtmosphere(track: TrackData): TrackAtmosphere {
     buildCrowd(root, track, disposables);
   }
   if (ENABLE_VERIFIED_PIT_STRAIGHT_PLACEMENTS) {
-    buildPitStraightSigns(root, track, disposables);
+    buildFrameHoardings(root, disposables);
     buildPitStraightCrowd(root, track, disposables);
   }
   root.userData.adInventory = TRACKSIDE_AD_SLOTS.map((slot) => slot.id);
@@ -48,69 +48,36 @@ export function createTrackAtmosphere(track: TrackData): TrackAtmosphere {
   };
 }
 
-/** Signs only on the verified start/finish complex, safely beyond both verges. */
-function buildPitStraightSigns(
+/** Artwork fitted into the three empty bays of the authored Object_39 frames. */
+function buildFrameHoardings(
   root: THREE.Group,
-  track: TrackData,
   disposables: Array<{ dispose(): void }>,
 ): void {
-  const geometry = new THREE.PlaneGeometry(4.8, 1.08);
-  const postGeometry = new THREE.BoxGeometry(0.065, 1.55, 0.065);
-  const postMaterial = new THREE.MeshStandardMaterial({ color: 0x27313a, metalness: 0.76, roughness: 0.34 });
-  const start = track.json.startSampleIndex;
-  const target = new THREE.Vector3();
-  const dummy = new THREE.Object3D();
-  const postTransforms: THREE.Matrix4[] = [];
-  disposables.push(geometry, postGeometry, postMaterial);
+  const frameSockets = [
+    { center: [42.2, 69.2, -340.25], size: [18.2, 8.6] },
+    { center: [74.0, 69.2, -340.25], size: [21.2, 8.6] },
+    { center: [99.7, 69.2, -340.25], size: [23.2, 8.6] },
+  ] as const;
 
-  for (let board = 0; board < 8; board++) {
-    const sample = track.samples[(start - 50 + board * 14 + track.count) % track.count]!;
-    const side = board % 2 === 0 ? 1 : -1;
-    const edge = side > 0 ? sample.bl : sample.br;
-    const lateral = side * (edge + 19.5);
-    const x = sample.p[0] + sample.n[0] * lateral;
-    const z = sample.p[2] + sample.n[2] * lateral;
-    const slot = TRACKSIDE_AD_SLOTS[board % TRACKSIDE_AD_SLOTS.length]!;
-    const texture = createAdTexture(slot.label, slot.background, slot.foreground);
+  for (let board = 0; board < frameSockets.length; board++) {
+    const socket = frameSockets[board]!;
+    const slot = TRACKSIDE_AD_SLOTS[board]!;
+    const geometry = new THREE.PlaneGeometry(socket.size[0], socket.size[1]);
+    const texture = createAdTexture(slot.label, slot.background, slot.foreground, true);
     const material = new THREE.MeshStandardMaterial({
       map: texture,
-      roughness: 0.36,
-      metalness: 0.04,
+      roughness: 0.46,
+      metalness: 0.01,
       side: THREE.DoubleSide,
     });
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.name = `AdSlot:${slot.id}:PitStraight:Near`;
-    target.set(sample.p[0], sample.p[1] + 2.05, sample.p[2]);
+    mesh.name = `AdSlot:${slot.id}:Object_39_Frame`;
+    mesh.position.set(socket.center[0], socket.center[1], socket.center[2]);
     mesh.castShadow = true;
-    const lod = new THREE.LOD();
-    lod.name = `AdSlot:${slot.id}:PitStraight`;
-    lod.position.set(x, sample.p[1] + 2.05, z);
-    lod.lookAt(target);
-    lod.addLevel(mesh, 0);
-    // At broadcast-scale distances the board occupies less than a pixel; the
-    // empty far level avoids material/texture work without visible popping.
-    lod.addLevel(new THREE.Object3D(), 380);
-    root.add(lod);
-    disposables.push(texture, material);
-
-    for (const along of [-1.8, 1.8]) {
-      dummy.position.set(
-        x + sample.t[0] * along,
-        sample.p[1] + 0.78,
-        z + sample.t[2] * along,
-      );
-      dummy.rotation.set(0, 0, 0);
-      dummy.scale.set(1, 1, 1);
-      dummy.updateMatrix();
-      postTransforms.push(dummy.matrix.clone());
-    }
+    mesh.receiveShadow = true;
+    root.add(mesh);
+    disposables.push(geometry, texture, material);
   }
-  const posts = new THREE.InstancedMesh(postGeometry, postMaterial, postTransforms.length);
-  posts.name = 'PitStraightAdPosts';
-  for (let i = 0; i < postTransforms.length; i++) posts.setMatrixAt(i, postTransforms[i]!);
-  posts.instanceMatrix.needsUpdate = true;
-  posts.castShadow = true;
-  root.add(posts);
 }
 
 function buildPitStraightCrowd(
@@ -276,23 +243,41 @@ function buildCrowd(
   disposables.push(geometry, material);
 }
 
-function createAdTexture(label: string, background: string, foreground: string): THREE.CanvasTexture {
+function createAdTexture(
+  label: string,
+  background: string,
+  foreground: string,
+  funnyArtwork = false,
+): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
   canvas.height = 256;
   const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = background;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = foreground;
-  ctx.fillRect(0, 0, 22, canvas.height);
-  ctx.fillRect(canvas.width - 22, 0, 22, canvas.height);
-  ctx.font = 'italic 900 116px Arial, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(label, canvas.width / 2, canvas.height / 2 + 5);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 4;
+  texture.anisotropy = 8;
+  const paint = (image?: CanvasImageSource): void => {
+    ctx.fillStyle = background;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (image) ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = foreground;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const lines = label.split('\n');
+    ctx.font = `italic 900 ${lines.length > 1 ? 72 : 104}px Arial, sans-serif`;
+    const top = canvas.height * 0.5 - (lines.length - 1) * 42;
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i]!, 64, top + i * 84, 690);
+    }
+    texture.needsUpdate = true;
+  };
+  paint();
+  if (funnyArtwork) {
+    const image = new Image();
+    image.decoding = 'async';
+    image.onload = () => paint(image);
+    image.src = '/motogp/funny-hoarding-base.png';
+  }
   return texture;
 }
 

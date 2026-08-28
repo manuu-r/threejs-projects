@@ -6,11 +6,7 @@ export interface TrackSurfaceDetails {
   dispose(): void;
 }
 
-/**
- * Subtle, geometry-following wear around the authored start/finish complex.
- * Keeping these decals to the verified pit-straight samples avoids placing a
- * generated ribbon on Nürburgring branches that are not part of the race lap.
- */
+/** Fixed, render-only tyre deposits at heavy-braking zones. */
 export function createTrackSurfaceDetails(track: TrackData): TrackSurfaceDetails {
   const root = new THREE.Group();
   root.name = 'TrackSurfaceDetails';
@@ -18,34 +14,16 @@ export function createTrackSurfaceDetails(track: TrackData): TrackSurfaceDetails
   const materials: THREE.Material[] = [];
   const start = track.json.startSampleIndex;
 
-  const racingLine = buildRibbon(track, start - 72, start + 72, 0.86, 0);
-  const lineMaterial = new THREE.MeshStandardMaterial({
-    color: 0x17191a,
-    roughness: 0.64,
-    metalness: 0,
-    transparent: true,
-    opacity: 0.11,
-    depthWrite: false,
-    polygonOffset: true,
-    polygonOffsetFactor: -2,
-    polygonOffsetUnits: -2,
-  });
-  const line = new THREE.Mesh(racingLine, lineMaterial);
-  line.name = 'RacingLineWear';
-  line.receiveShadow = true;
-  root.add(line);
-  geometries.push(racingLine);
-  materials.push(lineMaterial);
-
   const skidMaterial = new THREE.MeshBasicMaterial({
-    color: 0x08090a,
+    color: 0x101112,
     transparent: true,
-    opacity: 0.17,
+    opacity: 0.68,
     depthWrite: false,
     toneMapped: true,
+    side: THREE.DoubleSide,
     polygonOffset: true,
-    polygonOffsetFactor: -3,
-    polygonOffsetUnits: -3,
+    polygonOffsetFactor: -12,
+    polygonOffsetUnits: -12,
   });
   materials.push(skidMaterial);
   for (const [from, to, lateral] of [
@@ -53,10 +31,19 @@ export function createTrackSurfaceDetails(track: TrackData): TrackSurfaceDetails
     [-54, -37, 0.2],
     [31, 44, -0.16],
     [32, 45, 0.16],
+    [96, 111, -0.18],
+    [97, 112, 0.18],
+    [246, 260, -0.18],
+    [247, 261, 0.18],
+    [482, 497, -0.18],
+    [483, 498, 0.18],
+    [718, 733, -0.18],
+    [719, 734, 0.18],
   ] as const) {
-    const geometry = buildRibbon(track, start + from, start + to, 0.075, lateral);
+    const geometry = buildTyreMark(track, start + from, start + to, 0.105, lateral);
     const mark = new THREE.Mesh(geometry, skidMaterial);
     mark.name = 'BakedTyreMark';
+    mark.renderOrder = 4;
     root.add(mark);
     geometries.push(geometry);
   }
@@ -71,7 +58,7 @@ export function createTrackSurfaceDetails(track: TrackData): TrackSurfaceDetails
   };
 }
 
-function buildRibbon(
+function buildTyreMark(
   track: TrackData,
   fromInclusive: number,
   toInclusive: number,
@@ -86,10 +73,14 @@ function buildRibbon(
     const edgeFade = Math.min(1, step / 8, (count - 1 - step) / 8);
     const half = width * 0.5 * Math.max(0.02, edgeFade);
     for (const side of [-1, 1]) {
-      const offset = lateralOffset + side * half;
+      // Tiny deterministic wandering keeps the deposits organic while the
+      // underlying authored road and its collision mesh remain untouched.
+      const progress = count > 1 ? step / (count - 1) : 0;
+      const wander = Math.sin(progress * Math.PI * 2.4 + lateralOffset * 11) * 0.018;
+      const offset = lateralOffset + wander + side * half;
       positions.push(
         sample.p[0] + sample.n[0] * offset,
-        sample.p[1] + 0.028,
+        sample.p[1] + 0.12,
         sample.p[2] + sample.n[2] * offset,
       );
     }

@@ -70,6 +70,8 @@ export class Bike {
   private riderCockpitHands: THREE.Object3D | null = null;
   private riderCockpitArms: THREE.Object3D | null = null;
   private riderVisible = true;
+  /** GLTF materials are shared by many primitives; finish each source once. */
+  private readonly enhancedMaterials = new WeakMap<THREE.Material, THREE.Material>();
   private readonly crashDetector = new CrashDetector();
   private vehicleConstraintAttached = true;
   private riderCrashBodyId: BodyID | null = null;
@@ -250,13 +252,28 @@ export class Bike {
   private enhanceBikeMaterial(mesh: THREE.Mesh): void {
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     const enhanced = materials.map((source) => {
+      const cached = this.enhancedMaterials.get(source);
+      if (cached) return cached;
       let material = source;
-      if (!(material instanceof THREE.MeshStandardMaterial)) return material;
+      if (!(material instanceof THREE.MeshStandardMaterial)) {
+        this.enhancedMaterials.set(source, material);
+        return material;
+      }
       const name = material.name.toLowerCase();
       const rider = /rider|ch20_body/.test(`${mesh.name} ${name}`.toLowerCase());
       const fairing = !rider && /motogp|ducati|021615|frontcolor|m_0020_red|mediumblue/.test(name);
-      if (fairing && !(material instanceof THREE.MeshPhysicalMaterial)) {
-        material = this.toPhysicalFairing(material);
+      const glass = /glass|windscreen|screen|visor|translucent/.test(name);
+      const carbon = /carbon/.test(name);
+      const rubber = /tyre|tire|rubber|wheelfront1mtl|wheelrear0061mtl/.test(name);
+      const metal = !rubber && !carbon && !glass &&
+        /metal|silver|bolt|fork|forcella|chain|rearset|velg|handlebars|wheelfixed|wheelfront00/.test(name);
+      const brushedMetal = metal && /brushed|fork|forcella|rearset|velg|handlebars/.test(name);
+      if (!(material instanceof THREE.MeshPhysicalMaterial)) {
+        if (glass) material = this.toPhysicalGlass(material);
+        else if (rider) material = this.toPhysicalRider(material);
+        else if (carbon) material = this.toPhysicalCarbon(material);
+        else if (brushedMetal) material = this.toPhysicalBrushedMetal(material);
+        else if (fairing) material = this.toPhysicalFairing(material);
       }
       if (material.map) {
         material.map.colorSpace = THREE.SRGBColorSpace;
@@ -267,40 +284,98 @@ export class Bike {
       if (material.metalnessMap) material.metalnessMap.colorSpace = THREE.NoColorSpace;
       if (material.aoMap) material.aoMap.colorSpace = THREE.NoColorSpace;
 
-      const metal = /metal|silver|bolt|fork|forcella|chain|rearset|velg|handlebars|wheelfixed|wheelfront00/.test(name);
-      const carbon = /carbon/.test(name);
-      const rubber = /tyre|tire|rubber|wheelfront1mtl|wheelrear0061mtl/.test(name);
-      if (rider) {
+      if (glass) {
         material.metalness = 0;
-        material.roughness = 0.5;
-        // The rider is one baked texture/material, including the black helmet.
-        // Stronger IBL gives its curved shell a sky highlight without washing
-        // the red leathers or inventing a separate helmet mesh at runtime.
-        material.envMapIntensity = 0.9;
+        material.roughness = 0.09;
+        material.envMapIntensity = 1.25;
+      } else if (rider) {
+        material.metalness = 0;
+        material.roughness = 0.56;
+        // The authored rider is a single baked texture containing helmet,
+        // leather and gloves. A restrained fabric sheen preserves the suit's
+        // weave while the clear layer keeps the helmet curvature readable.
+        material.envMapIntensity = 0.72;
       } else if (metal) {
-        material.metalness = Math.max(material.metalness, 0.82);
-        material.roughness = THREE.MathUtils.clamp(material.roughness, 0.2, 0.42);
+        material.metalness = Math.max(material.metalness, 0.92);
+        material.roughness = THREE.MathUtils.clamp(material.roughness, 0.22, 0.4);
       } else if (carbon) {
-        material.metalness = 0.18;
-        material.roughness = 0.3;
+        // Carbon fibre is a coated dielectric composite, not bare metal.
+        material.metalness = 0;
+        material.roughness = 0.34;
+        material.color.multiplyScalar(0.84);
       } else if (rubber) {
         material.metalness = 0;
-        material.roughness = 0.8;
+        material.roughness = 0.86;
         // Real racing rubber is charcoal with a broad, dim highlight—not an
         // absolute black hole. Slight albedo gain preserves the supplied tread.
-        material.color.multiplyScalar(1.22);
-        material.envMapIntensity = 0.46;
+        material.color.multiplyScalar(1.08);
+        material.envMapIntensity = 0.32;
       } else if (fairing) {
-        material.metalness = Math.max(material.metalness, 0.08);
-        material.roughness = THREE.MathUtils.clamp(material.roughness, 0.16, 0.24);
+        // Painted bodywork is a dielectric base beneath a glossy clear coat.
+        material.metalness = 0;
+        material.roughness = THREE.MathUtils.clamp(material.roughness, 0.22, 0.3);
+        // Slightly mute the baked game-model albedo so Ducati red reads as
+        // painted bodywork rather than emissive arcade red under daylight.
+        material.color.multiplyScalar(0.92);
       }
-      if (!rider && !rubber) {
-        material.envMapIntensity = metal ? 1.45 : fairing ? 1.18 : 0.9;
+      if (!rider && !rubber && !glass) {
+        material.envMapIntensity = metal ? 1.35 : fairing || carbon ? 1.08 : 0.82;
       }
       material.needsUpdate = true;
+      this.enhancedMaterials.set(source, material);
+      this.enhancedMaterials.set(material, material);
       return material;
     });
     mesh.material = Array.isArray(mesh.material) ? enhanced : enhanced[0]!;
+    if (/rider|hands|arms|marc93|ch20/i.test(mesh.name)) {
+      this.applyRiderColourZones(mesh, enhanced);
+    }
+  }
+
+  /**
+   * The source rider uses one baked material for helmet, leather, gloves and
+   * boots. Neutral vertex multipliers restore material separation without
+   * painting over Marc's supplied 93 graphics or sponsor texture.
+   */
+  private applyRiderColourZones(mesh: THREE.Mesh, materials: THREE.Material[]): void {
+    const position = mesh.geometry.getAttribute('position');
+    if (!position) return;
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    const bounds = mesh.geometry.boundingBox;
+    if (!bounds) return;
+    const colour = new Float32Array(position.count * 3);
+    const spanY = Math.max(1e-4, bounds.max.y - bounds.min.y);
+    const cockpitLimb = /hands|arms|cockpit/i.test(mesh.name);
+    for (let i = 0; i < position.count; i++) {
+      const height = (position.getY(i) - bounds.min.y) / spanY;
+      let r = 0.66;
+      let g = 0.51;
+      let b = 0.49;
+      if (cockpitLimb) {
+        r = 0.64;
+        g = 0.49;
+        b = 0.47;
+      } else if (height > 0.73) {
+        // Helmet shell: cooler, darker and glossier through the same PBR map.
+        r = 0.62;
+        g = 0.64;
+        b = 0.68;
+      } else if (height < 0.27) {
+        // Boots and lower gloves should not glow as brightly as the suit.
+        r = 0.6;
+        g = 0.58;
+        b = 0.58;
+      }
+      colour[i * 3] = r;
+      colour[i * 3 + 1] = g;
+      colour[i * 3 + 2] = b;
+    }
+    mesh.geometry.setAttribute('color', new THREE.Float32BufferAttribute(colour, 3));
+    for (const material of materials) {
+      if (!(material instanceof THREE.MeshStandardMaterial)) continue;
+      material.vertexColors = true;
+      material.needsUpdate = true;
+    }
   }
 
   private toPhysicalFairing(source: THREE.MeshStandardMaterial): THREE.MeshPhysicalMaterial {
@@ -322,30 +397,83 @@ export class Bike {
       displacementMap: source.displacementMap,
       displacementScale: source.displacementScale,
       displacementBias: source.displacementBias,
-      roughness: Math.min(source.roughness, 0.28),
+      roughness: THREE.MathUtils.clamp(source.roughness, 0.22, 0.3),
       roughnessMap: source.roughnessMap,
-      metalness: Math.max(source.metalness, 0.08),
+      metalness: 0,
       metalnessMap: source.metalnessMap,
       alphaMap: source.alphaMap,
       envMap: source.envMap,
-      envMapIntensity: 1.35,
+      envMapIntensity: 1.08,
       transparent: source.transparent,
       opacity: source.opacity,
       alphaTest: source.alphaTest,
       side: source.side,
       depthTest: source.depthTest,
       depthWrite: source.depthWrite,
-      clearcoat: 0.94,
-      clearcoatRoughness: 0.13,
-      sheen: 0.08,
-      sheenRoughness: 0.5,
-      sheenColor: new THREE.Color(0x8f1018),
+      clearcoat: 0.88,
+      clearcoatRoughness: 0.16,
+      ior: 1.48,
+      specularIntensity: 0.9,
     });
     material.vertexColors = source.vertexColors;
     material.flatShading = source.flatShading;
     material.polygonOffset = source.polygonOffset;
     material.polygonOffsetFactor = source.polygonOffsetFactor;
     material.polygonOffsetUnits = source.polygonOffsetUnits;
+    return material;
+  }
+
+  /** Clear-coated composite with broad reflections over the woven albedo. */
+  private toPhysicalCarbon(source: THREE.MeshStandardMaterial): THREE.MeshPhysicalMaterial {
+    const material = this.toPhysicalFairing(source);
+    material.metalness = 0;
+    material.roughness = 0.34;
+    material.clearcoat = 0.62;
+    material.clearcoatRoughness = 0.25;
+    material.specularIntensity = 0.86;
+    return material;
+  }
+
+  /** Brushed aluminium/steel uses directional highlights instead of mirror chrome. */
+  private toPhysicalBrushedMetal(source: THREE.MeshStandardMaterial): THREE.MeshPhysicalMaterial {
+    const material = this.toPhysicalFairing(source);
+    material.metalness = 0.96;
+    material.roughness = 0.29;
+    material.clearcoat = 0;
+    material.anisotropy = 0.62;
+    material.anisotropyRotation = Math.PI * 0.5;
+    return material;
+  }
+
+  /** Thin tinted windscreen/visor with reflective physically based transmission. */
+  private toPhysicalGlass(source: THREE.MeshStandardMaterial): THREE.MeshPhysicalMaterial {
+    const material = this.toPhysicalFairing(source);
+    material.metalness = 0;
+    material.roughness = 0.09;
+    material.clearcoat = 0.35;
+    material.clearcoatRoughness = 0.08;
+    material.transmission = 0.52;
+    material.thickness = 0.012;
+    material.ior = 1.5;
+    material.specularIntensity = 1;
+    material.transparent = true;
+    material.opacity = Math.min(source.opacity, 0.78);
+    material.depthWrite = false;
+    material.side = THREE.DoubleSide;
+    return material;
+  }
+
+  /** Baked racing leather: diffuse cloth sheen plus a subtle helmet/glove coat. */
+  private toPhysicalRider(source: THREE.MeshStandardMaterial): THREE.MeshPhysicalMaterial {
+    const material = this.toPhysicalFairing(source);
+    material.metalness = 0;
+    material.roughness = 0.56;
+    material.clearcoat = 0.08;
+    material.clearcoatRoughness = 0.3;
+    material.sheen = 0.22;
+    material.sheenRoughness = 0.78;
+    material.sheenColor.set(0x7f252d);
+    material.specularIntensity = 0.58;
     return material;
   }
 
