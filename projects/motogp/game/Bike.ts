@@ -272,7 +272,11 @@ export class Bike {
       const rubber = /tyre|tire|rubber|wheelfront1mtl|wheelrear0061mtl/.test(name);
       if (rider) {
         material.metalness = 0;
-        material.roughness = 0.6;
+        material.roughness = 0.5;
+        // The rider is one baked texture/material, including the black helmet.
+        // Stronger IBL gives its curved shell a sky highlight without washing
+        // the red leathers or inventing a separate helmet mesh at runtime.
+        material.envMapIntensity = 0.9;
       } else if (metal) {
         material.metalness = Math.max(material.metalness, 0.82);
         material.roughness = THREE.MathUtils.clamp(material.roughness, 0.2, 0.42);
@@ -281,12 +285,18 @@ export class Bike {
         material.roughness = 0.3;
       } else if (rubber) {
         material.metalness = 0;
-        material.roughness = 0.88;
+        material.roughness = 0.8;
+        // Real racing rubber is charcoal with a broad, dim highlight—not an
+        // absolute black hole. Slight albedo gain preserves the supplied tread.
+        material.color.multiplyScalar(1.22);
+        material.envMapIntensity = 0.46;
       } else if (fairing) {
         material.metalness = Math.max(material.metalness, 0.08);
         material.roughness = THREE.MathUtils.clamp(material.roughness, 0.16, 0.24);
       }
-      material.envMapIntensity = rider ? 0.48 : metal ? 1.45 : fairing ? 1.18 : 0.9;
+      if (!rider && !rubber) {
+        material.envMapIntensity = metal ? 1.45 : fairing ? 1.18 : 0.9;
+      }
       material.needsUpdate = true;
       return material;
     });

@@ -131,7 +131,7 @@ export async function loadTrackVisuals(
         if (material.roughnessMap) material.roughnessMap.colorSpace = THREE.NoColorSpace;
         if (material.metalnessMap) material.metalnessMap.colorSpace = THREE.NoColorSpace;
         if (material.aoMap) material.aoMap.colorSpace = THREE.NoColorSpace;
-        material.envMapIntensity = surface ? 0.72 : 0.9;
+        material.envMapIntensity = surface?.kind === 'asphalt' ? 0.9 : surface ? 0.76 : 0.9;
         material.needsUpdate = true;
       }
     }
@@ -273,8 +273,8 @@ function createSurfaceMaps(seed: number, repeat: number, relief: number): Surfac
       normalData[i + 3] = 255;
       // Fresh race asphalt is dark grey, not crushed black. Retain enough
       // albedo for sunlight, tyre wear and contact shadows to remain legible.
-      const asphaltTone = Math.round(76 + (h - 0.5) * 22 + (hash(x * 7, y * 11) > 0.992 ? 18 : 0));
-      albedoData.set([asphaltTone, asphaltTone + 1, asphaltTone + 3, 255], i);
+      const asphaltTone = Math.round(98 + (h - 0.5) * 24 + (hash(x * 7, y * 11) > 0.992 ? 16 : 0));
+      albedoData.set([asphaltTone, asphaltTone + 2, asphaltTone + 5, 255], i);
       const rough = THREE.MathUtils.clamp(0.72 + (h - 0.5) * 0.34, 0, 1) * 255;
       roughData.set([rough, rough, rough, 255], i);
       const ao = THREE.MathUtils.clamp(0.86 + h * 0.14, 0, 1) * 255;

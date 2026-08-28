@@ -154,6 +154,9 @@ test("uses an ACES, IBL and restrained post-processing pipeline", async () => {
   assert.match(rendererSource, /UnrealBloomPass/);
   assert.match(rendererSource, /SMAAPass/);
   assert.match(rendererSource, /PCFShadowMap/);
+  assert.match(rendererSource, /toneMappingExposure = 0\.57/);
+  assert.match(rendererSource, /rearFill/);
+  assert.match(rendererSource, /shadowWeight/);
 });
 
 test("adds tiled track micro-detail and bounded speed effects", async () => {
@@ -167,6 +170,7 @@ test("adds tiled track micro-detail and bounded speed effects", async () => {
   assert.match(visualsSource, /material\.roughnessMap/);
   assert.match(visualsSource, /material\.aoMap/);
   assert.match(visualsSource, /RepeatWrapping/);
+  assert.match(visualsSource, /const asphaltTone = Math\.round\(98/);
   assert.match(surfaceSource, /RacingLineWear/);
   assert.match(surfaceSource, /BakedTyreMark/);
   assert.match(speedSource, /WheelMotionBlur/);

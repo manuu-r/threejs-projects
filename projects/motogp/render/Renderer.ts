@@ -33,7 +33,7 @@ export class Renderer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.setSize(container.clientWidth || window.innerWidth, container.clientHeight || window.innerHeight);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.52;
+    this.renderer.toneMappingExposure = 0.57;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
     // PCF shadows remain stable as the shadow camera follows the motorcycle.
@@ -48,7 +48,9 @@ export class Renderer {
     // grass) from z-fighting at distance — 0.1 costs 5× of it for nothing.
     this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.5, 2500);
 
-    this.scene.add(new THREE.HemisphereLight(0xd8e9ff, 0x4b5638, 0.18));
+    // Open-sky ambient must preserve form in black helmets, tyres and carbon.
+    // A weak hemisphere light crushed all three into the asphalt in rear view.
+    this.scene.add(new THREE.HemisphereLight(0xd8e9ff, 0x52604a, 0.34));
 
     this.sun = new THREE.DirectionalLight(0xfff1d6, 1.48);
     this.sun.castShadow = true;
@@ -67,6 +69,17 @@ export class Renderer {
     this.sunTarget = new THREE.Object3D();
     this.sun.target = this.sunTarget;
     this.scene.add(this.sun, this.sunTarget);
+
+    // Subtle camera-side skylight, analogous to the broad fill used by a
+    // broadcast camera. It creates a readable rim across the rider and rear
+    // tyre when the physical sun is ahead of the motorcycle.
+    const rearFill = new THREE.DirectionalLight(0xc8dcf5, 0.28);
+    const rearFillTarget = new THREE.Object3D();
+    rearFill.position.set(0, 2.5, 1.5);
+    rearFillTarget.position.set(0, 0, -4);
+    rearFill.target = rearFillTarget;
+    this.camera.add(rearFill, rearFillTarget);
+    this.scene.add(this.camera);
 
     const sky = new Sky();
     sky.scale.setScalar(10000);
@@ -87,7 +100,7 @@ export class Renderer {
     pmrem.compileCubemapShader();
     this.environmentTarget = pmrem.fromScene(this.scene, 0.02, 0.1, 10000);
     this.scene.environment = this.environmentTarget.texture;
-    this.scene.environmentIntensity = 0.22;
+    this.scene.environmentIntensity = 0.34;
     pmrem.dispose();
 
     const width = container.clientWidth || window.innerWidth;
@@ -130,7 +143,11 @@ export class Renderer {
           color += texture2D(tDiffuse, vUv + direction * 1.8).rgb * 0.10;
           float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
           color = mix(vec3(luminance), color, 1.035);
-          color = (color - 0.5) * 1.025 + 0.5;
+          // Preserve separation in dark PBR materials instead of clipping
+          // helmet, tyre and asphalt into one near-black silhouette.
+          float shadowWeight = 1.0 - smoothstep(0.035, 0.24, luminance);
+          color += vec3(0.005, 0.0065, 0.0085) * shadowWeight;
+          color = (color - 0.5) * 0.995 + 0.5;
           gl_FragColor = vec4(color, 1.0);
         }
       `,
