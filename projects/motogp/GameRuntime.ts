@@ -82,7 +82,7 @@ export async function startMotoGpGame(container: HTMLElement): Promise<() => voi
   // contains stacked terrain and tarmac, so the centerline elevation is needed
   // to choose the visible road rather than the lower terrain shell.
   const pitGrid = track.samples[track.json.startSampleIndex]!;
-  const testLateral = GARAGE_TEST ? -24 : OFFROAD_TEST ? 15 : null;
+  const testLateral = GARAGE_TEST ? 24 : OFFROAD_TEST ? 15 : null;
   const testX = testLateral === null ? spawn.x : pitGrid.p[0] + pitGrid.n[0] * testLateral;
   const testZ = testLateral === null ? spawn.z : pitGrid.p[2] + pitGrid.n[2] * testLateral;
   const testSurface = queryPlayableSurface(asphalt, testX, pitGrid.p[1], testZ);

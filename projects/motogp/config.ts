@@ -158,7 +158,7 @@ export const CAMERA = {
   riderFovBaseDeg: 86,
   /** A restrained speed FOV shift; position never changes with throttle. */
   riderFovMaxDeg: 88,
-  riderVibrationM: 0.0045,
+  riderVibrationM: 0.0012,
 } as const;
 
 export const RESPAWN = {

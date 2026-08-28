@@ -87,8 +87,12 @@ export function buildTrackPhysics(
   // the player can enter the garage bays without falling through the venue.
   const grid = track.samples[track.json.startSampleIndex]!;
   const back = 150;
-  const inner = -6;
-  const outer = -42;
+  // The pit building is on the +normal side of the start sample.  The former
+  // negative offsets crossed the actual grid asphalt: the bike spawned on an
+  // invisible slab 0.83 m above the road, then dropped when the 300 m slab
+  // ended. Keep the extension wholly on the garage side instead.
+  const inner = 6;
+  const outer = 42;
   const point = (along: number, lateral: number): [number, number, number] => [
     grid.p[0] + grid.t[0] * along + grid.n[0] * lateral,
     grid.p[1] - 0.035,

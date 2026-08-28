@@ -25,33 +25,34 @@ export class Renderer {
 
   constructor(private readonly container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
+      // SMAA is applied after post-processing. A second MSAA stage wastes GPU
+      // time and made frame pacing visibly uneven on high-DPI displays.
+      antialias: false,
       powerPreference: 'high-performance',
-      // Road decals sit centimetres above the grass; 16-bit depth buffers
-      // (SwiftShader, some mobile GPUs) can't resolve that past ~50 m.
-      logarithmicDepthBuffer: true,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.setSize(container.clientWidth || window.innerWidth, container.clientHeight || window.innerHeight);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.61;
+    this.renderer.toneMappingExposure = 0.46;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.VSMShadowMap;
+    // PCF shadows remain stable as the shadow camera follows the motorcycle.
+    // VSM was producing bright bleeding and shimmer against the pit buildings.
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0xb9ccda, 0.00024);
+    this.scene.fog = new THREE.FogExp2(0x9fb2c1, 0.00022);
 
     // near 0.5: depth precision is what keeps the road decals (2–4 cm above the
     // grass) from z-fighting at distance — 0.1 costs 5× of it for nothing.
     this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.5, 2500);
 
-    this.scene.add(new THREE.HemisphereLight(0xd8e9ff, 0x55623e, 0.2));
+    this.scene.add(new THREE.HemisphereLight(0xd8e9ff, 0x4b5638, 0.14));
 
-    this.sun = new THREE.DirectionalLight(0xfff1d6, 1.82);
+    this.sun = new THREE.DirectionalLight(0xfff1d6, 1.28);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(3072, 3072);
+    this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.bias = -0.00008;
     this.sun.shadow.normalBias = 0.035;
     this.sun.shadow.radius = 2;
@@ -86,24 +87,24 @@ export class Renderer {
     pmrem.compileCubemapShader();
     this.environmentTarget = pmrem.fromScene(this.scene, 0.02, 0.1, 10000);
     this.scene.environment = this.environmentTarget.texture;
-    this.scene.environmentIntensity = 0.24;
+    this.scene.environmentIntensity = 0.16;
     pmrem.dispose();
 
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
     this.composer = new EffectComposer(this.renderer);
-    this.composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.composer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.composer.addPass(new RenderPass(this.scene, this.camera));
 
     // Screen-space AO supplies the missing contact shadow under the tyres and
     // between rider, tank and cockpit. Keep the radius tight to avoid halos.
     this.ssao = new SSAOPass(this.scene, this.camera, width, height, 24);
-    this.ssao.kernelRadius = 4;
+    this.ssao.kernelRadius = 2.5;
     this.ssao.minDistance = 0.002;
-    this.ssao.maxDistance = 0.02;
+    this.ssao.maxDistance = 0.012;
     this.composer.addPass(this.ssao);
 
-    const bloom = new UnrealBloomPass(new THREE.Vector2(width, height), 0.045, 0.16, 1.16);
+    const bloom = new UnrealBloomPass(new THREE.Vector2(width, height), 0.012, 0.1, 1.3);
     this.composer.addPass(bloom);
     this.speedGrade = new ShaderPass({
       uniforms: {
@@ -144,12 +145,17 @@ export class Renderer {
   /** Keep the shadow frustum centered near `target` (the bike). */
   trackSunOn(targetPos: { x: number; y: number; z: number }): void {
     this.sunDirection.copy(this.sun.position).sub(this.sunTarget.position).normalize();
+    // Lock movement to small world-space increments so sub-pixel chassis
+    // vibration cannot make every shadow edge crawl from frame to frame.
+    const targetX = Math.round(targetPos.x * 20) / 20;
+    const targetY = Math.round(targetPos.y * 20) / 20;
+    const targetZ = Math.round(targetPos.z * 20) / 20;
     this.sun.position.set(
-      targetPos.x + this.sunDirection.x * 200,
-      targetPos.y + this.sunDirection.y * 200,
-      targetPos.z + this.sunDirection.z * 200,
+      targetX + this.sunDirection.x * 200,
+      targetY + this.sunDirection.y * 200,
+      targetZ + this.sunDirection.z * 200,
     );
-    this.sunTarget.position.set(targetPos.x, targetPos.y, targetPos.z);
+    this.sunTarget.position.set(targetX, targetY, targetZ);
   }
 
   render(): void {
@@ -159,7 +165,7 @@ export class Renderer {
   /** Motion cue is intentionally optical only; it never changes camera position. */
   setSpeedEffect(speedMps: number): void {
     this.speedGrade.uniforms.uRadialBlur!.value =
-      THREE.MathUtils.smoothstep(speedMps, 28, 92) * 0.0032;
+      THREE.MathUtils.smoothstep(speedMps, 28, 92) * 0.0014;
   }
 
   dispose(): void {

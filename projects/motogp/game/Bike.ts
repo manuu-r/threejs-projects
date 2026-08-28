@@ -183,9 +183,10 @@ export class Bike {
       const mount = new THREE.Group();
       mount.name = 'MarcMarquez93Ducati';
       // Physics root is the chassis centre; the Blender assembly is ground-based.
-      // Seat the authored tyre contact patches on the physics wheel plane.
-      // The prior visual offset left a thin daylight gap beneath both tyres.
-      mount.position.set(0, -0.755, 0);
+      // The settled Jolt chassis rides 0.975 m above the authored asphalt.
+      // Mount the ground-based Blender assembly by the same amount so its tyre
+      // contact patches—not its object origin—sit on the physical road.
+      mount.position.set(0, -0.975, 0);
       mount.add(gltf.scene);
       this.riderVisual = gltf.scene.getObjectByName('Marc93_Rider_Baked_Final') ?? null;
       this.riderCockpitHands = gltf.scene.getObjectByName('Marc93_Rider_Hands_Cockpit') ?? null;

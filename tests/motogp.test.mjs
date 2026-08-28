@@ -56,6 +56,7 @@ test("uses the Marc Marquez Ducati assembly and keeps unsafe generated ads disab
     readFile(new URL("projects/motogp/track/TrackAtmosphere.ts", projectRoot), "utf8"),
   ]);
   assert.match(bikeSource, /ducati-rider-game-rig\.glb/);
+  assert.match(bikeSource, /mount\.position\.set\(0, -0\.975, 0\)/);
   assert.match(bikeSource, /MarcMarquez93Ducati/);
   assert.match(bikeSource, /this\.ready = this\.loadModel\(\)/);
   assert.match(runtimeSource, /await bike\.ready/);
@@ -88,6 +89,8 @@ test("recovers against the authored asphalt instead of a synthetic world floor",
   assert.match(physicsSource, /frictionForRole/);
   assert.match(physicsSource, /case 'gravel'/);
   assert.match(physicsSource, /garageApron/);
+  assert.match(physicsSource, /const inner = 6/);
+  assert.match(physicsSource, /const outer = 42/);
   assert.match(physicsSource, /PLAYABLE_ROLES/);
 });
 
@@ -132,7 +135,7 @@ test("uses an ACES, IBL and restrained post-processing pipeline", async () => {
   assert.match(rendererSource, /SSAOPass/);
   assert.match(rendererSource, /UnrealBloomPass/);
   assert.match(rendererSource, /SMAAPass/);
-  assert.match(rendererSource, /VSMShadowMap/);
+  assert.match(rendererSource, /PCFShadowMap/);
 });
 
 test("adds tiled track micro-detail and bounded speed effects", async () => {
