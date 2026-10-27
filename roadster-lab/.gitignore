@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tsbuildinfo
+art/*.blend1
+art/*.blend
+output/
+
+# Manufacturer photographs are private modeling references, not runtime assets.
+art/official-*-reference.jpg
+art/references/
